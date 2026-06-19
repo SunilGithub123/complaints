@@ -25,7 +25,7 @@ This document captures **every** tech choice across the three environments (Dev 
 | In-process Cache | Caffeine | latest |
 | Rate Limiting | Bucket4j (in-memory) | latest |
 | API Docs | springdoc-openapi | 2.x |
-| DTO Mapping | MapStruct | 1.5.x |
+| DTO Mapping | Hand-written `*Mapper` classes (no MapStruct — full control) | — |
 | Boilerplate | Lombok | latest |
 | Build | Maven | 3.9+ |
 | Testing | JUnit 5, Mockito, Testcontainers | bundled |
@@ -165,6 +165,58 @@ Codebase is identical across profiles. Only `application-{profile}.yml` differs.
 | Kafka | Pub/Sub is serverless and cheaper at our volume |
 | ELK Stack | Heavy to manage; GCP Cloud Logging is free + zero setup |
 | Standard GKE | More expensive due to node management overhead |
-| MongoDB | Our data is relational (consumers, complaints, substations) |
+| MongoDB | Our data is relational (consumers, complaints, subdivisions, DCs) |
 | Self-hosted Postgres in prod | Backups, HA, patching = ops burden; Cloud SQL is better |
+| MapStruct | Adds an annotation-processor + magic; hand-written `*Mapper` classes give us full control and zero build-time surprises at our scale |
+| **Multi-module Maven layout (v1)** | A single-module Maven project with strong package boundaries is enough for the v1 monolith. Multi-module adds POM overhead and friction without giving us anything we can't already get from package discipline. We can extract modules later if/when a piece is genuinely reused or split into its own service. See **Build Layout** below. |
 
+---
+
+## Build Layout — Single-Module Maven (v1)
+
+We are using a **single-module Maven project** for v1 — one `pom.xml` at the project root, all code under `src/main/java/com/example/complaints/...` split into the packages listed in `TECHNICAL_DESIGN.md §3` (`auth`, `complaint`, `masterdata`, `notification`, `storage`, `audit`, `datasync`, `common`, `config`).
+
+### Why single-module is the right choice now
+
+| Factor | Single-module | Multi-module |
+|--------|---------------|--------------|
+| **App count** | 1 deployable JAR. Multi-module shines when you have ≥ 2 deployables (e.g., `app` + `batch-job` + `cli`). | Overkill for one JAR. |
+| **Team size** | Small team (1–3 devs). Module boundaries cost more in POM ceremony than they save. | Pays off with ≥ 5–10 devs working in parallel on separate modules. |
+| **Build time** | One `mvn package` (~30s clean for v1). | Faster *incremental* builds for huge codebases, but adds reactor / inter-module-version overhead. |
+| **Dependency direction enforcement** | Enforced by **ArchUnit** tests + package-private classes. | Enforced by Maven (compile error if a module imports the wrong way). Stronger, but ArchUnit is good enough. |
+| **IDE experience** | Trivial — open one project. | Slightly more steps; multi-module Maven import in IntelliJ is reliable but noisier. |
+| **Refactor cost** | Renaming a package = single IDE refactor. | Cross-module moves require POM edits. |
+| **CI complexity** | One job, one cache. | Multi-module reactor + per-module test runs add wiring. |
+| **Spring Boot conventions** | Default; every Spring Initializr project starts this way. | Common only for "platform" projects with shared starters. |
+
+### How we keep module discipline *without* multi-module
+
+1. **Package boundary tests with ArchUnit** — a small set of JUnit tests under `src/test/java/com/example/complaints/architecture/` that fail the build if, e.g., `notification` imports anything from `complaint.service` directly (must go through events), or if any module imports from `controller` of another module.
+2. **Package-private by default** — public classes only when crossing a module boundary (DTOs, service interfaces, events). Implementations stay package-private.
+3. **Module-local DTOs** — no leaking JPA entities across modules; cross-module communication is through DTOs / events only.
+4. **Single shared `common` package** for cross-cutting utilities, exception classes, and the `ApiResponse<T>` envelope.
+
+### When (and how) we would split into multi-module
+
+We'd revisit *only* if one of these triggers:
+
+- A second deployable appears (e.g., a standalone `datasync-worker` JAR, or a `notification-worker` once Pub/Sub goes async-only).
+- The team grows past ~5 backend devs and merge contention becomes painful.
+- We want to publish a reusable library (e.g., `complaints-client-sdk` for the EB system to call us).
+
+**Migration path** when it happens (mechanical, ~1 day):
+
+```
+complaints/                                    complaints/
+├── pom.xml          (single)         →        ├── pom.xml                 (parent, packaging=pom)
+├── src/main/java/com/example/...              ├── complaints-common/      (shared DTOs, enums)
+                                               ├── complaints-core/        (domain modules)
+                                               ├── complaints-app/         (Spring Boot app — depends on core)
+                                               └── complaints-datasync/    (new deployable, optional)
+```
+
+Because the v1 packages already mirror the eventual modules 1:1, the split is a `git mv` + 4 new `pom.xml` files — no code changes.
+
+### Verdict
+
+**Stay single-module for v1 → v2.** Re-evaluate at v3 or when a second deployable is genuinely needed.

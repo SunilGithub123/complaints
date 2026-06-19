@@ -17,7 +17,15 @@ Documentation index for the **Complaint Resolution System** (State Electricity B
 - **Project goal:** Help consumers raise complaints (power outage, low voltage, transformer fault, etc.) against their consumer number and track resolution.
 - **Scale target:** 1M consumers, ~10K complaints/day across Maharashtra.
 - **Tech:** Java 21 · Spring Boot 4.1 · PostgreSQL · Caffeine (in-JVM cache) · GCP · Kubernetes (GKE Autopilot in prod)
-- **Clients:** Web portal (consumers + admins), React Native mobile app (field technicians + engineers).
+- **Clients:** Web portal (consumers + admins + engineers), React Native mobile app (technicians + engineers). Consumers also use the web portal / app via a public "Consumer" entry point — **no consumer login or registration**.
+
+## Roles & Onboarding
+
+- **Consumer** — **no registration, no login, no password.** Each time they submit a complaint, view complaints, cancel, or leave feedback they enter **Consumer ID + Mobile + OTP** to get a 5-minute verification token.
+- **Admin** — seeded directly in the DB. First admin via the bootstrap runner (`BOOTSTRAP_ADMIN_EMPLOYEE_ID` / `BOOTSTRAP_ADMIN_PASSWORD` / `BOOTSTRAP_ADMIN_SUBDIVISION_CODE` env vars); additional admins via DBA SQL insert. **One active admin per Subdivision.** No admin self-registration API.
+- **Engineer** — created by an **Admin** only (scoped to a DC within the admin's subdivision). **One active engineer per DC.**
+- **Technician** — created by an **Admin** or an **Engineer** (engineers can only create technicians within their own DC). **Many technicians per DC.**
+- **Staff login:** Employee ID + Password. New staff accounts (and the bootstrap admin) are created with `password_reset_required = true`, so the **first login forces a password change** before anything else is allowed.
 
 ## Project Phases
 

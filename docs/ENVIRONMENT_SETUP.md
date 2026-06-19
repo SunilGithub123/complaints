@@ -51,14 +51,24 @@ docker compose up -d
 ```
 
 ### 1.3 Run the App
+
+On a **fresh database** (first run), set the bootstrap-admin env vars so `AuthBootstrapRunner` can create the initial admin user:
+
 ```bash
+export BOOTSTRAP_ADMIN_EMPLOYEE_ID=ADMIN001
+export BOOTSTRAP_ADMIN_PASSWORD='ChangeMe!123'
+export BOOTSTRAP_ADMIN_SUBDIVISION_CODE=SUB-NSK-001   # must exist in `subdivision` table (seed it first via SQL or datasync)
+
 ./mvnw spring-boot:run -Dspring-boot.run.profiles=dev
 ```
+
+On subsequent runs the env vars are not required (the runner is a no-op once any admin exists). The bootstrap admin is created with `password_reset_required = TRUE`, so the **first login** must call `POST /auth/password/change` before anything else.
 
 ### 1.4 Verify
 - Swagger UI: <http://localhost:8080/swagger-ui.html>
 - Actuator health: <http://localhost:8080/actuator/health>
 - Logs: console (OTP mock will print to console)
+- Log in via Swagger using `POST /auth/login` with the bootstrap admin credentials above.
 
 ### 1.5 Stop
 ```bash
@@ -148,6 +158,13 @@ GCP_PROJECT_ID=complaints-test
 MSG91_KEY=<from-msg91>
 FCM_SA_JSON_PATH=/etc/fcm-sa.json
 JWT_SECRET=<random-256-bit>
+CORS_ALLOWED_ORIGINS=https://complaints-test.example.in
+SWAGGER_BASIC_USER=admin
+SWAGGER_BASIC_PASSWORD=<strong-swagger-password>
+TZ=Asia/Kolkata
+BOOTSTRAP_ADMIN_EMPLOYEE_ID=ADMIN001
+BOOTSTRAP_ADMIN_PASSWORD=<strong-bootstrap-password>
+BOOTSTRAP_ADMIN_SUBDIVISION_CODE=SUB-NSK-001
 EOF
 ```
 
