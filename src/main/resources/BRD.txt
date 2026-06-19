@@ -1,0 +1,349 @@
+1. Project Overview
+What is the name of the project/system?
+-Complaint Resolution System
+
+What is the primary goal of this system? (e.g., reduce complaint resolution time, improve transparency)
+- To manage complaints efficiently, reduce the time it takes to resolve them, and improve transparency in the resolution process.
+- To provide a platform for users to submit complaints, track their status, and receive updates.
+- To facilitate communication between users and the relevant authorities.
+
+Who are the key stakeholders? (e.g., consumers, field engineers, supervisors, admin)
+- Users
+- Admin
+- Engineers
+- Field Technicians
+
+2. Scope
+What is in scope? (e.g., complaint creation, tracking, resolution)
+- Complaint creation
+- Tracking
+- Resolution
+
+What is out of scope? (e.g., billing disputes, meter replacement requests)
+- Billing disputes
+- Meter replacement requests
+
+Which geographic regions / districts will this system cover?
+- Sub-stations under stations in Maharashtra
+
+Will this be a web app, mobile app, or both?
+- Web app
+- Mobile app
+
+
+3. Stakeholders & User Roles
+For each role, define:
+Who are they? (e.g., Consumer, Field Technician, Admin)
+Consumers: Individuals who will submit complaints regarding electricity issues.
+Field technicians: Professionals responsible for addressing and resolving complaints in the field.
+Admins: System administrators who manage the system and ensure compliance with regulations.
+Engineers: Professionals who analyze complaints, and assign them to field technicians based on their expertise.
+
+What can they do? (permissions per role)
+Consumers: Submit complaints, track complaint status, receive updates, and provide feedback on resolution.
+Field technicians: View assigned complaints, update complaint status, communicate with consumers, and provide resolution details
+Admins: Manage user accounts, oversee complaint resolution process, generate reports, and ensure compliance with regulations.
+Engineers: Analyze complaints, assign them to field technicians based on their expertise, and monitor the resolution process.
+
+How will they access the system? (web portal, mobile, SMS, IVR?)
+web portal, mobile
+
+4. Functional Requirements
+4.1 Consumer Registration & Authentication
+- Users can register Consumer id, mobile number and password.
+- Users can login using Consumer id as id and password.
+
+
+4.2 Complaint Creation:
+- Users can submit complaints enven when they are not logged in(guest mode), but they will need to provide their consumer id and mobile number for verification.
+- Users can submit complaints through a web portal or mobile app.
+- One user can submit multiple complaints.
+- Complaints can be categorized by severity.
+- User can add images, description and location of the complaint.
+- Categories like power outage, low voltage, transformer fault,other etc. will be available for users to select while submitting complaints.
+- we will add autodetecting of location/address of the user later
+- SLA will be of 24 hours initially and that can be changed later by admin.
+
+4.3 Complaint management and tracking:
+- Engineers can analyze complaints and assign them to field technicians based on their expertise.
+- Admins can manage complaints, assign them to field technicians, and generate reports.
+- Field technicians can view and update the status of assigned complaints.
+- Users can track the status of their complaints in real-time, and can cancel their complaints.
+- Users receive notifications about updates on their complaints.
+
+4.4 Complaint Resolution & Closure
+- Field technicians can resolve complaints and provide resolution details.
+- Admins can monitor the resolution process and ensure compliance with regulations.
+- Users can provide feedback on the resolution process.
+- Complaints are closed when the resolution is complete.
+
+4.6 Notifications & Alerts
+- Users will receive notifications about updates on their complaints.
+- Admins and Engineers will receive alerts about new complaints and updates.
+- Users can opt-out of notifications.
+
+
+
+Non-functional Requirements:
+- Performance: There can be 1 million consumers, and may be 10000 complaints per day
+- Scalability: The system should be able to handle a large number of users and complaints.
+- Security: The system should ensure the security of user data and prevent unauthorized access.
+- Usability: The system should be user-friendly and easy to navigate for all user roles.
+- Reliability: The system should be reliable and available at all times, with minimal downtime.
+- Accessibility: Language/multilingual support for English, Hindi, Marathi.
+
+5. Integration Requirements
+
+- Integration: System should integrate with existing systems and services for consumer data.
+
+Technical Requirements:
+- Programming Language: Java,Springboot, Spring Security, React, ReactJs for mobile app
+- Database: PostgreSQL
+- Cloud Platform: GCP
+- Deployment: KUBERNETES
+- Version Control: GitHub
+- Testing: JUnit, Selenium
+- Monitoring: Prometheus, Grafana
+- Logging: ELK Stack (Elasticsearch, Logstash, Kibana)
+- CI/CD: GitHub Actions
+- Documentation: Swagger
+
+
+
+
+
+Queries:
+We want to make this cost effective and efficient system.
+
+Authentication & User Management
+Consumer registration — Does the consumer ID already exist in an external electricity board system, or will your system generate it? (i.e., do we validate against an existing consumer database?)
+yes Consumer ID already exists in external electricity board system
+Password reset — Do you need forgot password / reset password flow? Via OTP or email link?
+yes via OTP initially
+Admin & Engineer accounts — Are these created by a super-admin manually, or is there a self-registration flow for internal staff too?
+staff can send registration request and admins can approve them, also admins should be able to register
+Session management — JWT-based stateless auth is the standard approach. Any preference for token expiry duration? (e.g., 30 min access token + 7-day refresh token)
+yes JWT based stateless auth 30 mins access and 7-day refresh token
+
+Guest Complaint Flow
+OTP verification — For guest complaints, you mentioned consumer ID + mobile number verification. Should we send an OTP to verify the mobile number, or just match it against the existing consumer record?
+verify the OTP on mobile number
+SMS provider — Do you have a preferred SMS gateway (e.g., MSG91, Twilio, or a government SMS gateway)?
+which ever most commonly used and cost effective
+
+
+Complaint Workflow
+Complaint statuses — Based on your BRD, I'm assuming this flow: SUBMITTED → ASSIGNED → IN_PROGRESS → RESOLVED → CLOSED. Should there also be REJECTED or DUPLICATE statuses?
+Yes there are REJECTED and DUPLICATE statuses also CANCENED with valid reasons
+
+Complaint cancellation — You mentioned users can cancel complaints. Can they cancel at any stage, or only before it's assigned/in-progress?
+only before it's assigned/in-progress
+'
+Re-opening — Can a consumer re-open a complaint after it's resolved/closed if not satisfied?
+Auto-assignment — Should engineers manually assign complaints to field technicians, or do you want auto-assignment based on area/substation? (can be a v2 feature)
+
+SLA & Escalation
+SLA breach — When the 24-hour SLA is breached, what should happen? Send alert to engineer?
+send alert to Engineer and while closing there shoudl be reason for closing after SLA breach
+Escalation levels — Is it single level (engineer → admin) or multi-level?
+only Engineer for now
+
+Notifications
+Notification channels for v1 — Which channels are must-have for launch: in-app only, in-app + SMS, or in-app + SMS + email?
+in-app only
+
+Push notifications — Do you need Firebase push notifications for the mobile app in v1?
+yes users should receive push notifications
+
+Data & Geography
+Station/Substation master data — Will you provide a static list of stations and substations, or should the system have an admin UI to manage this hierarchy (Station → Substation → Area)?
+It will be static data, but admin can add/remove/edit stations and substations
+Create on seperate table to store station and substation details and create relationship with consumer table, we will dump the data from external system to this table
+
+Consumer-to-substation mapping — Is each consumer number already mapped to a substation in the external system, or does the consumer select their area manually?
+yes it is mapped to substation
+
+File Uploads
+Image uploads — Any limit on number of images per complaint? (e.g., max 3 images, max 1MB each?)
+max 3 images, max 1MB each and compress the images
+
+Storage — GCP Cloud Storage for images is the natural choice. Any preference or existing bucket?
+GCP Cloud storage
+
+Reporting
+Reports needed for v1 — Which reports are priority: complaints by area, average resolution time, SLA compliance, engineer/technician performance, or all of them?
+we can skip all of them for v1
+
+Infrastructure & Deployment
+Environments — Do you need dev, staging, and production environments from the start?
+dev and test for now and production later
+
+Existing GCP project — Do you already have a GCP project set up, or is that to be provisioned?
+No we will create a new project
+
+Domain & SSL — Do you have a domain name for the API and web portal?
+dont have domain name for now
+
+Mobile App
+React Native — You mentioned ReactJs for mobile app. Did you mean React Native for cross-platform (iOS + Android), or separate native apps?
+yes
+
+Mobile v1 scope — Should the mobile app support all roles, or just consumers in v1? (admin/engineer use web portal)
+just Field technicians and engineers in v1
+
+
+Cost-Effective for Complaint Resolution System in Production:
+
+Cloud: GCP (Mumbai asia-south1)
+Compute: GKE Autopilot
+Database: Cloud SQL PostgreSQL
+Cache: dont need for now
+Object Storage: GCP Cloud Storage
+Message Queue: GCP Pub/Sub
+SMS: MSG91 (only external service)
+Monitoring: GCP Cloud Ops (logging + monitoring + dashboards, all built-in)
+CI/CD: GitHub Actions
+
+DEV (Local — $0/month)
+Layer
+Choice
+Notes
+Compute
+Docker Compose on laptop
+Single docker-compose up
+Database
+PostgreSQL container
+Port 5432
+Cache
+Redis container
+Port 6379
+File Storage
+Local /uploads folder
+Mapped volume
+Message Queue
+Spring Events (in-memory)
+No external dependency
+SMS
+Console log (mock, prints OTP to log)
+No real SMS
+Monitoring
+Prometheus + Grafana containers
+Optional, only when needed
+API Docs
+Swagger UI (springdoc)
+http://localhost:8080/swagger-ui
+
+TEST (Cloud-hosted, accessible online — ~$10-30/month)
+Layer
+Choice
+Cost
+Notes
+Compute
+1 GCP e2-small VM (2 vCPU, 2GB RAM)
+~$15/month
+Runs your Spring Boot JAR directly
+Database
+PostgreSQL on same VM (Docker)
+$0 (same VM)
+Or use Supabase free tier (500MB, hosted Postgres)
+Cache
+Upstash Redis free tier
+$0
+10K commands/day, enough for testing
+File Storage
+GCP Cloud Storage
+$0
+5GB free tier
+Message Queue
+GCP Pub/Sub
+$0
+10GB/month free
+SMS
+MSG91 sandbox
+$0
+Test OTPs, not delivered to real phones
+Monitoring
+GCP Cloud Logging (built-in)
+$0
+Auto-collects from VM
+CI/CD
+GitHub Actions → deploy to VM via SSH
+$0
+Auto-deploy on push
+Domain (optional)
+Free subdomain (e.g., nip.io or free Cloudflare)
+$0
+Or just use VM's public IP
+Total TEST cost: ~$15/month (just the VM, everything else is free tier)
+💡 Alternative: Use GCP's **<span>300 free credits (90 days)** — then TEST is also</span>0 for 3 months.
+
+PROD (Future — ~$700-1,100/month)
+Layer
+Choice
+Compute
+GKE Autopilot
+Database
+Cloud SQL PostgreSQL (HA)
+Cache
+GCP Memorystore Redis
+File Storage
+GCP Cloud Storage
+Message Queue
+GCP Pub/Sub
+SMS
+MSG91 (production DLT-registered)
+Monitoring
+GCP Cloud Ops (Logging + Monitoring)
+CI/CD
+GitHub Actions → GKE deploy
+
+What You Start Building With
+What
+Tool
+Language
+Java 21
+Framework
+Spring Boot 4.1
+Security
+Spring Security + JWT
+ORM
+Spring Data JPA + Hibernate
+Build
+Maven
+API Docs
+springdoc-openapi (Swagger)
+Containerization
+Docker + Docker Compose
+Database
+PostgreSQL
+Cache
+Redis
+Testing
+JUnit 5 + Mockito + Testcontainers
+Code Quality
+Lombok, MapStruct (DTO mapping)
+
+Spring Profiles Strategy
+Profile
+Activated By
+Connects To
+application-dev.yml
+--spring.profiles.active=dev
+Local Docker containers
+application-test.yml
+--spring.profiles.active=test
+Cloud free-tier services (Upstash, GCP, etc.)
+application-prod.yml
+--spring.profiles.active=prod
+GCP managed services
+Same codebase, just different config per environment.
+
+
+
+
+
+
+
+
+
+
