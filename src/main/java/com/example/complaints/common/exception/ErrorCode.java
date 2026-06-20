@@ -43,11 +43,14 @@ public enum ErrorCode {
     // ---------- Master data ----------
     SUBDIVISION_NOT_FOUND          (HttpStatus.NOT_FOUND,             "Subdivision not found"),
     SUBDIVISION_INACTIVE           (HttpStatus.CONFLICT,              "Subdivision is inactive"),
+    SUBDIVISION_CODE_TAKEN         (HttpStatus.CONFLICT,              "Subdivision code already in use"),
     DC_NOT_FOUND                   (HttpStatus.NOT_FOUND,             "Distribution center not found"),
     DC_INACTIVE                    (HttpStatus.CONFLICT,              "Distribution center is inactive"),
+    DC_CODE_TAKEN                  (HttpStatus.CONFLICT,              "Distribution center code already in use"),
     DC_NOT_IN_SCOPE                (HttpStatus.FORBIDDEN,             "Distribution center is outside your scope"),
     CATEGORY_NOT_FOUND             (HttpStatus.NOT_FOUND,             "Complaint category not found"),
     CATEGORY_INACTIVE              (HttpStatus.CONFLICT,              "Complaint category is inactive"),
+    CATEGORY_CODE_TAKEN            (HttpStatus.CONFLICT,              "Complaint category code already in use"),
 
     // ---------- Complaint lifecycle ----------
     COMPLAINT_NOT_FOUND            (HttpStatus.NOT_FOUND,             "Complaint not found"),

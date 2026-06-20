@@ -152,7 +152,6 @@ public class StaffAuthService {
                 .tokenHash(sha256(refresh.jwt()))
                 .expiresAt(refresh.expiresAt())
                 .revoked(false)
-                .createdAt(Instant.now())
                 .lastUsedAt(Instant.now())
                 .build();
         refreshTokens.save(stored);

@@ -13,8 +13,6 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.Instant;
-
 /**
  * Seeds the very first ADMIN user from {@code BOOTSTRAP_ADMIN_*} env vars on a fresh DB.
  *
@@ -84,8 +82,6 @@ public class AuthBootstrapRunner implements CommandLineRunner {
                 .distributionCenterId(null)
                 .enabled(true)
                 .notificationsPushEnabled(true)
-                .createdAt(Instant.now())
-                .updatedAt(Instant.now())
                 .build();
         users.save(admin);
         log.info("Seeded bootstrap ADMIN employee {} for subdivision {}",

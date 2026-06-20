@@ -100,7 +100,7 @@ Per minimum-test policy: 1 happy + 1 unhappy per behavior; no exhaustive matrice
 
 #### Carry-overs / known follow-ups
 
-- **`archunit.properties` → `failOnEmptyShould=true`** — flip once Phase 2 module is in (so empty rules are caught as bugs).
+- **`archunit.properties` → `failOnEmptyShould=true`** — ✅ done in Stage 2.
 - **Repository IT slice** — add a small `@DataJpaTest`-driven IT when the first non-derived query lands (Phase 2 specs).
 - **OpenAPI security scheme** — declare `bearerAuth` in `OpenApiConfig` so Swagger UI surfaces an "Authorize" button. Defer until first protected endpoint is exercised manually.
 - **CHANGE_PASSWORD audit** — listener will be added with the `audit` module (Phase 7 per ROADMAP). For now, `lastLoginAt` is updated on successful login.
@@ -108,9 +108,129 @@ Per minimum-test policy: 1 happy + 1 unhappy per behavior; no exhaustive matrice
 
 ---
 
-### Stage 2 · Backend `masterdata` module — ☐ not started
+### Stage 2 · Backend `masterdata` module — ✅ 2026-06-20
 
-_(To be filled in when stage lands.)_
+#### Scope delivered
+
+**Domain** (`com.example.complaints.masterdata.model`)
+- `Subdivision`, `DistributionCenter`, `ComplaintCategory` — Lombok `@Builder`, all schema columns, `@PrePersist/@PreUpdate` timestamps. Backed by the `subdivision`, `distribution_center`, `complaint_category` tables shipped in `V1.0__init_schema.sql`.
+
+**Persistence** (`masterdata.repository`)
+- `SubdivisionRepository`, `DistributionCenterRepository`, `ComplaintCategoryRepository` — derived finders only (`findByCode`, `existsByCode`, `findBySubdivisionId(Pageable)`); no `@Query` until a real specification is needed.
+
+**DTOs** (`masterdata.dto`, all records)
+- `SubdivisionRequest` / `Response`, `DistributionCenterRequest` / `Response`, `ComplaintCategoryRequest` / `Response`.
+- Request DTOs carry `jakarta.validation` constraints (`@NotBlank`, `@Pattern` for code shape, `@Min/@Max` for SLA hours).
+
+**Mappers** (hand-written, one per entity)
+- `SubdivisionMapper`, `DistributionCenterMapper`, `ComplaintCategoryMapper` — all timestamps run through `DateUtils.toIst(...)` so the wire format is IST.
+
+**Services** (`masterdata.service`)
+- One class per aggregate (SRP, per copilot-instructions). Each exposes `list`, `get`, `create`, `update`, `setActive`, plus a cross-module `requireActive(...)` returning the entity for other services to consume.
+- **Caching:** `@Cacheable` on `get(id)` against the Caffeine caches already declared in `CaffeineCacheConfig` (`subdivisions` / `distributionCenters` / `categories`); `@CacheEvict(allEntries=true)` on every write.
+- **Scope enforcement (`DistributionCenterService`):** writes accept the `AuthenticatedStaff` principal and check `me.subdivisionId() == target.subdivisionId`; mismatch → `DC_NOT_IN_SCOPE`. Non-admin callers → `FORBIDDEN`.
+
+**Controllers** (`masterdata.controller`)
+- `MasterdataReadController` (`GET /api/v1/staff/masterdata/...`) — any authenticated staff can list/get subdivisions, DCs, categories. Supports `?subdivisionId=` filter on DCs.
+- `SubdivisionAdminController`, `DistributionCenterAdminController`, `ComplaintCategoryAdminController` — mounted under `/api/v1/admin/masterdata/...` so the `SecurityConfig.hasRole("ADMIN")` matcher gates them. Each exposes `POST` create, `PUT /{id}` update, `POST /{id}/activate`, `POST /{id}/deactivate`.
+
+**ErrorCodes added**
+- `SUBDIVISION_CODE_TAKEN`, `DC_CODE_TAKEN`, `CATEGORY_CODE_TAKEN` (all `409 CONFLICT`) — follow the existing `EMPLOYEE_ID_TAKEN` pattern.
+
+#### Incidents fixed during implementation
+
+| # | Symptom | Root cause | Fix |
+|---|---------|-----------|-----|
+| 1 | Carry-over from Stage 1: `archunit.properties` had `archRule.failOnEmptyShould=false`. | Was set during Phase 0 when per-module packages didn't exist so rules matched zero classes. With auth + masterdata now in, an accidentally-empty rule should be a build failure. | Flipped to `archRule.failOnEmptyShould=true`. Comment in the file explains the history. All 5 rules still match real classes — re-ran `PackageBoundaryTest` to confirm. |
+
+No new incidents originated in Stage 2 itself — the SB 4.1 / Jackson 3 / ArchUnit lessons from Stage 1 carried through cleanly. The masterdata controller test reused the **same WebMvcTest pattern** documented in Stage 1 incident #5 (mock the filter's `JwtFactory` dependency + `addFilters = false`).
+
+#### Tests added
+
+Minimum-test policy applied: 1 happy + 1 unhappy per **representative** behavior. CRUD on three aggregates is shape-identical, so we test the *create* path on each service (uniqueness + write) and one MockMvc surface as a controller-layer canary.
+
+- `masterdata/service/SubdivisionServiceTest` — 2 tests (happy create, duplicate-code conflict).
+- `masterdata/service/DistributionCenterServiceTest` — 2 tests (happy create in admin's own subdivision, cross-subdivision attempt → `DC_NOT_IN_SCOPE`).
+- `masterdata/service/ComplaintCategoryServiceTest` — 2 tests (happy create, duplicate-code conflict).
+- `masterdata/controller/SubdivisionAdminControllerTest` (`@WebMvcTest`) — 2 tests (happy `POST` 200 + envelope, validation failure 400 + `VALIDATION_FAILED`).
+
+(Admin-vs-non-admin authorization on `/api/v1/admin/**` is enforced by `SecurityConfig` and verified end-to-end in the boot IT — no separate slice test, per the "don't mock the system under test" rule.)
+
+#### Build status
+
+```
+[INFO] Tests run: 19, Failures: 0, Errors: 0  (Surefire — unit;  +8 from Stage 1)
+[INFO] Tests run:  1, Failures: 0, Errors: 0  (Failsafe — IT; same Flyway baseline)
+[INFO] BUILD SUCCESS
+```
+
+ArchUnit strict mode is on; all 5 boundary rules still pass.
+
+#### Carry-overs / known follow-ups
+
+- **Deactivation guardrails not yet enforced.** A subdivision with active DCs, a DC with an active engineer, or a category with open complaints can all be deactivated today. We don't yet have the complaint module to reference; will add the checks alongside the staff-user-mgmt service (Phase 2 admin features) and complaint module (Phase 3).
+- **`sla_config` table** (per-category SLA override) is not exposed. `ComplaintCategory.slaHours` is the only SLA surface in v1; the override table stays unused until we ship configurable per-DC SLA.
+- **Subdivision-write authority.** Any ADMIN can currently create / update / deactivate any subdivision (subdivision-scope check applies only to DCs). Per the BRD, subdivisions are DBA-seeded; tighter restriction (e.g. a `SYSADMIN` role, or moving subdivision writes to a DBA-only endpoint) is a Phase-7 admin-features item.
+- **Audit + domain events** — every write should publish a `MasterdataChangedEvent` for the audit log. Deferred to the `audit` module (Phase 7).
+- **`@DataJpaTest` repository IT** — still not added; the boot IT covers schema + bean wiring. Will revisit when a non-derived query lands (Phase 3 complaint specs).
+
+---
+
+### Stage 2.1 · DB-managed `created_at` / `updated_at` — ✅ 2026-06-20
+
+#### Why
+
+Stage 1 + Stage 2 entities each carried `@PrePersist` / `@PreUpdate` lifecycle callbacks that
+duplicated `DEFAULT now()` in the schema. Two sources of truth for the same column = bugs
+waiting (e.g. a JDBC-only writer or a raw `UPDATE` would skip the JPA hook). Moved the
+responsibility to where it belongs: the DB.
+
+#### Scope delivered
+
+- **New Flyway migration `V1.3__add_updated_at_trigger.sql`** —
+  - Creates a re-usable `set_updated_at()` plpgsql function (`NEW.updated_at = now()`).
+  - A `DO $$` block auto-discovers every `public.*` table with an `updated_at` column and attaches a `BEFORE UPDATE … FOR EACH ROW EXECUTE FUNCTION set_updated_at()` trigger. Idempotent via `DROP TRIGGER IF EXISTS`.
+  - Result on a fresh DB: 7 triggers — `subdivision`, `distribution_center`, `complaint_category`, `sla_config`, `consumer_master`, `user_account`, `complaint`.
+- **Entities updated** (`auth.model.UserAccount`, `RefreshToken`; `masterdata.model.{Subdivision, DistributionCenter, ComplaintCategory}`):
+  - Removed `@PrePersist` / `@PreUpdate` callbacks.
+  - `created_at` column → `@Generated(event = EventType.INSERT)` + `insertable = false, updatable = false`. DB DEFAULT supplies the value on INSERT; Hibernate re-reads it.
+  - `updated_at` column → `@Generated(event = {EventType.INSERT, EventType.UPDATE})` + `insertable = false, updatable = false`. DB DEFAULT + trigger; Hibernate re-reads after both events.
+  - `RefreshToken.last_used_at` stays app-managed (it's a domain field, not an auto-bump).
+- **Callers cleaned up** — removed `.createdAt(Instant.now()).updatedAt(Instant.now())` from `AuthBootstrapRunner.run(...)` and `StaffAuthService.issueTokenPair(...)`. Unused `import java.time.Instant` pruned where applicable.
+
+#### Verification
+
+Round-tripped against a fresh local Postgres (not just Hibernate validate):
+
+```
+INSERT … TRG_TEST …    →  created_at == updated_at                    ✓
+UPDATE … 1 s later     →  updated_at > created_at; delta 1.012s       ✓
+```
+
+#### Tests added
+
+None. The behaviour is verified by:
+- The boot IT (`ComplaintsApplicationIT`) — Hibernate schema validation now passes against the trigger-equipped schema, and the bootstrap runner inserts the admin row without manually setting timestamps.
+- Direct SQL round-trip above.
+
+Adding a `@DataJpaTest`-style unit just to assert "INSERT sets `created_at`" would be testing Postgres, not our code.
+
+#### Incidents
+
+None. Hibernate's `@Generated` integration worked first-try with `insertable=false, updatable=false`; the trigger function attached to all 7 target tables; all 20 existing tests stayed green (19 unit + 1 IT).
+
+#### Build status
+
+```
+[INFO] Tests run: 19, Failures: 0, Errors: 0  (Surefire — unit)
+[INFO] Tests run:  1, Failures: 0, Errors: 0  (Failsafe — IT; Flyway now applies V1.0→1.1→1.2→1.3→1000.0)
+[INFO] BUILD SUCCESS
+```
+
+#### Carry-overs / known follow-ups
+
+- **New tables added in future migrations** that include `updated_at` should either re-run the same `DO $$` block, or attach the trigger explicitly inside their own `CREATE TABLE` migration. Document this in the migration template (Phase 7 follow-up).
+- **Optimistic locking** — `@Version` columns are still not present. When concurrent updates become real (Phase 3 complaint state machine), add `version BIGINT NOT NULL DEFAULT 0` columns and the matching `@Version` field, distinct from the time-based `updated_at`.
 
 ---
 

@@ -11,6 +11,8 @@ import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+import org.hibernate.annotations.Generated;
+import org.hibernate.generator.EventType;
 
 import java.time.Instant;
 
@@ -44,10 +46,12 @@ public class RefreshToken {
     @Column(name = "revoked", nullable = false)
     private boolean revoked;
 
-    @Column(name = "created_at", nullable = false, updatable = false)
+    /** Set by DB DEFAULT now() on INSERT; never modified after. */
+    @Generated(event = EventType.INSERT)
+    @Column(name = "created_at", insertable = false, updatable = false)
     private Instant createdAt;
 
+    /** Domain field — explicitly set by the service on every refresh use. */
     @Column(name = "last_used_at", nullable = false)
     private Instant lastUsedAt;
 }
-
