@@ -1,0 +1,32 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/complaints
+    username: complaints
+    password: complaints
+
+  flyway:
+    locations: classpath:db/migration,classpath:db/migration-dev
+
+  cache:
+    type: caffeine
+    caffeine:
+      spec: maximumSize=10000,expireAfterWrite=10m
+
+app:
+  storage:
+    type: local
+    local-path: ./uploads
+  sms:
+    provider: console
+  notification:
+    push: mock
+  cors:
+    allowed-origins: "http://localhost:*"
+  swagger:
+    secured: false                        # Swagger UI is open in dev
+
+logging:
+  level:
+    com.example.complaints: DEBUG
+    org.hibernate.SQL: DEBUG
+

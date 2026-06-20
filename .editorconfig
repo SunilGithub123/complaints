@@ -1,0 +1,25 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+indent_style = space
+indent_size = 4
+insert_final_newline = true
+trim_trailing_whitespace = true
+max_line_length = 140
+
+[*.{xml,yml,yaml,json,md}]
+indent_size = 2
+
+[*.md]
+trim_trailing_whitespace = false        # double-space line-break is meaningful in Markdown
+max_line_length = off
+
+[*.sql]
+indent_size = 4
+keep_blank_lines_in_code = 1
+
+[Makefile]
+indent_style = tab
+

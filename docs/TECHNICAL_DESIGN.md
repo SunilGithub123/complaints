@@ -707,15 +707,45 @@ open http://localhost:8080/swagger-ui.html
 
 ## 14. Testing Strategy
 
+### 14.1 Test pyramid
+
 | Type | Tool | Scope |
 |------|------|-------|
 | Unit | JUnit 5 + Mockito | Services, validators, utils |
 | Integration | Spring Boot Test + Testcontainers (Postgres) | Repositories + service flows |
 | API Contract | MockMvc / RestAssured | Controllers + security |
-| E2E | Selenium | Critical user journeys (web) |
+| Architecture | ArchUnit | Package-boundary rules (§16.7) |
+| E2E | Playwright (driven from FE repo) | Critical user journeys |
 | Load (v2) | k6 or Gatling | RPS targets |
 
-Target coverage: **80%+** for services and controllers.
+### 14.2 Minimum-test policy (v1 — keep it lean)
+
+We deliberately keep test count **low and high-signal** in v1. Every feature ships with tests, but the *minimum bar* is:
+
+- **Per service method:** **1 happy path** + **1 failure / edge case** (e.g. not-found, validation error, ownership check). That's it. No exhaustive matrix testing in v1.
+- **Per controller endpoint:** **1 MockMvc test** asserting status + response shape + auth/role enforcement.
+- **Per repository custom query:** **1 Testcontainers integration test** proving the query returns the expected rows.
+- **Per Flyway migration:** verified by the existing `init_schema` Testcontainers boot (no extra test needed unless the migration contains data logic).
+- **Architecture rules:** a single ArchUnit test class with ~5 rules (no `controller → repository` direct calls, no cross-module `*.service.*` imports, etc.).
+
+> **The rule of thumb:** *"Would I miss this if it broke in prod tomorrow?"* If yes → write the test. If it's covering a happy path already exercised by another test, skip it.
+
+### 14.3 What we do **not** write in v1
+
+- Multi-permutation parameterised tests for every input variation.
+- Mockito tests that assert internal calls between two private methods.
+- Tests that mock the very class under test.
+- Snapshot tests on JSON responses (use focused `assertThat(field).isEqualTo(...)` instead).
+- E2E for every screen — only the **critical 3–4 user journeys** (consumer-submit-complaint, engineer-assign-and-close, technician-resolve, admin-create-staff).
+
+### 14.4 Coverage target
+
+- **No hard coverage gate** in v1 (gating on a number tempts people to write low-value tests). We track it informally — expect **~60–70%** organically with the above policy, which is enough.
+- The gate becomes **80% on services + controllers** at v2, once flows are stable.
+
+### 14.5 When the policy changes
+
+We expand to richer parameterised tests, mutation testing (Pitest), and contract tests (Pact) **after the first production incident in a given area** — that's where the extra investment pays back. Until then, *minimum tests, high signal*.
 
 ---
 

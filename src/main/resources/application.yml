@@ -1,0 +1,85 @@
+spring:
+  application:
+    name: complaints
+  profiles:
+    default: dev
+
+  jackson:
+    time-zone: Asia/Kolkata
+    # Note: Spring Boot 4.1 ships Jackson 3 (`tools.jackson.*`).
+    # Jackson 3 already disables WRITE_DATES_AS_TIMESTAMPS by default and is
+    # tolerant of unknown properties; the legacy `spring.jackson.serialization.*` /
+    # `deserialization.*` keys no longer round-trip into the new enum names.
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: Asia/Kolkata
+        format_sql: false
+
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    locations: classpath:db/migration
+
+  servlet:
+    multipart:
+      max-file-size: 1MB
+      max-request-size: 5MB
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      show-details: when-authorized
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: alpha
+    tags-sorter: alpha
+  api-docs:
+    path: /v3/api-docs
+
+jwt:
+  access-token-ttl: PT30M
+  refresh-token-ttl: P7D
+  consumer-verification-ttl: PT5M
+  issuer: complaints-api
+  # HS256 secret — DEV ONLY default. Override per-env via ${JWT_SECRET}.
+  secret: ${JWT_SECRET:dev-secret-do-not-use-in-prod-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_}
+
+app:
+  timezone: Asia/Kolkata
+  complaint:
+    default-sla-hours: 24
+    max-images: 3
+    max-image-bytes: 1048576              # 1 MB
+    ticket-prefix: MH
+  pagination:
+    default-size: 20
+    max-size: 100
+  otp:
+    length: 6
+    ttl: PT5M
+    max-per-mobile-per-hour: 5
+    cooldown-seconds: 30
+    max-attempts: 5
+  bootstrap-admin:
+    employee-id: ${BOOTSTRAP_ADMIN_EMPLOYEE_ID:}
+    password: ${BOOTSTRAP_ADMIN_PASSWORD:}
+    subdivision-code: ${BOOTSTRAP_ADMIN_SUBDIVISION_CODE:}
+
+logging:
+  level:
+    root: INFO
+    com.example.complaints: INFO
+    org.springframework.security: WARN
+

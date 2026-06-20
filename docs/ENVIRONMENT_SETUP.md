@@ -224,8 +224,73 @@ sudo systemctl start complaints
 
 ### 2.9 Access
 - API: `http://<VM-EXTERNAL-IP>:8080`
-- Swagger: `http://<VM-EXTERNAL-IP>:8080/swagger-ui.html`
+- Swagger: `http://<VM-EXTERNAL-IP>:8080/swagger-ui.html` (HTTP Basic-gated)
 - Logs: `journalctl -u complaints -f` or GCP Cloud Logging Console
+
+### 2.10 Frontend on Test — GCS static-website bucket (~$0.05/month)
+
+The web app (built in the separate `complaints-frontend` repo) is hosted as a public GCS website bucket, **mirroring the prod hosting model** so any CSP / cache / SPA-routing issue shows up in test, not in prod.
+
+**One-time setup** (in the test GCP project):
+
+```bash
+# Create the bucket
+gcloud storage buckets create gs://complaints-web-test \
+  --location=asia-south1 \
+  --uniform-bucket-level-access \
+  --default-storage-class=STANDARD
+
+# Configure as a SPA-friendly website
+gcloud storage buckets update gs://complaints-web-test \
+  --web-main-page-suffix=index.html \
+  --web-error-page=index.html        # 404 fallback → SPA handles routing
+
+# Make objects publicly readable (test only; prod uses signed URLs via Cloud CDN)
+gcloud storage buckets add-iam-policy-binding gs://complaints-web-test \
+  --member=allUsers --role=roles/storage.objectViewer
+```
+
+The site is then reachable at:
+
+```
+https://storage.googleapis.com/complaints-web-test/index.html
+```
+
+(Optional: point a CNAME from `test.<your-domain>` for a friendlier URL — free.)
+
+**Update backend CORS** on the test VM so the FE origin is allowed:
+
+```bash
+# Append to /etc/complaints.env
+CORS_ALLOWED_ORIGINS=https://storage.googleapis.com
+```
+
+…then `sudo systemctl restart complaints`.
+
+**Deploy flow** (driven by GitHub Actions in the `complaints-frontend` repo on merge to `main`):
+
+```bash
+# Inside the FE repo CI:
+pnpm install --frozen-lockfile
+pnpm --filter web build
+
+# Hashed assets — cache forever
+gsutil -m -h "Cache-Control:public,max-age=31536000,immutable" \
+       rsync -r -d -x "index\\.html$" apps/web/dist/ gs://complaints-web-test/
+
+# index.html — always revalidate
+gsutil -h "Cache-Control:no-cache,must-revalidate" \
+       cp apps/web/dist/index.html gs://complaints-web-test/index.html
+```
+
+Wall-clock deploy time after build: **~10 seconds**. Rollback = re-run an older workflow's artifact upload step (FE CI keeps the last 5 builds).
+
+**Cost:**
+- GCS storage: ~10 MB × $0.020/GB-month ≈ **$0.0002/mo**
+- Egress: < 1 GB/mo at $0.08/GB ≈ **$0.05/mo**
+- Total FE-on-test: **~$0.05/month** (effectively a rounding error on the bill).
+
+> Mobile app on test is *not* deployed to the VM — internal QA installs come from **EAS Build** preview URLs (also free under the EAS Free plan). See `FRONTEND_DESIGN.md §8.2`.
 
 ---
 

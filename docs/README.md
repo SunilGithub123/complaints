@@ -2,11 +2,18 @@
 
 Documentation index for the **Complaint Resolution System** (State Electricity Board, Maharashtra).
 
+> **Two-repo project** (locked):
+> - **`complaints/`** *(this repo)* — Spring Boot backend (Java 21, Maven, single-module).
+> - **`complaints-frontend/`** *(sibling repo)* — React 19 + Vite web (PWA) + React Native + Expo mobile, pnpm + Turborepo monorepo. See [FRONTEND_DESIGN.md](./FRONTEND_DESIGN.md).
+
 | Document | Description |
 |----------|-------------|
 | [BRD.md](./BRD.md) | Business Requirements Document — what we are building and why |
+| [ROADMAP.md](./ROADMAP.md) | Phased delivery plan (backend + frontend + DevOps) — what gets built in what order |
+| [IMPLEMENTATION_LOG.md](./IMPLEMENTATION_LOG.md) | Living record of what has actually shipped per phase / stage, with incident notes — updated at the end of every stage |
 | [TECH_STACK.md](./TECH_STACK.md) | Tech stack decisions per environment (Dev / Test / Prod) with cost analysis |
 | [TECHNICAL_DESIGN.md](./TECHNICAL_DESIGN.md) | System architecture, package structure, DB schema, API contracts, security |
+| [FRONTEND_DESIGN.md](./FRONTEND_DESIGN.md) | Web portal (React) + mobile app (React Native / Expo) — stack, repo layout, UX flows, build/deploy |
 | [ENVIRONMENT_SETUP.md](./ENVIRONMENT_SETUP.md) | How to run Dev (local), deploy to Test (GCP VM), and plan for Prod (GKE) |
 | [schema.sql](./schema.sql) | Full PostgreSQL DDL for all tables |
 

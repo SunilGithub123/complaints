@@ -1,0 +1,32 @@
+spring:
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/complaints}
+    username: ${DB_USER:complaints}
+    password: ${DB_PASSWORD}
+
+  cache:
+    type: caffeine
+    caffeine:
+      spec: maximumSize=10000,expireAfterWrite=10m
+
+  cloud:
+    gcp:
+      project-id: ${GCP_PROJECT_ID}
+
+app:
+  storage:
+    type: gcs
+    gcs-bucket: ${GCS_BUCKET:complaints-images-test}
+  sms:
+    provider: msg91-sandbox
+    msg91-key: ${MSG91_KEY:}
+  notification:
+    push: fcm
+    fcm-credentials: ${FCM_SA_JSON_PATH:}
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS}
+  swagger:
+    secured: true                         # HTTP Basic gate
+    basic-user: ${SWAGGER_BASIC_USER}
+    basic-password: ${SWAGGER_BASIC_PASSWORD}
+
