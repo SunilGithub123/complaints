@@ -234,7 +234,48 @@ None. Hibernate's `@Generated` integration worked first-try with `insertable=fal
 
 ---
 
-### Stage 3 · Frontend `packages/api` (orval codegen) — ☐ not started
+### Stage 3 · Frontend `packages/api` (orval codegen) — 🟡 backend slice done 2026-06-20
+
+> Stage 3 spans **both** repos. The backend side ships the reproducible OpenAPI
+> contract; the frontend side wires orval against it. Frontend work continues in
+> `complaints-frontend/`.
+
+#### Scope delivered (backend slice)
+
+- **`OpenApiConfig` gained Bearer auth schemes.** Declared two HTTP-bearer security schemes that the FE codegen (and Swagger UI's "Authorize" button) understand:
+  - `bearerAuth` — staff access JWT (default global requirement, applied to `/staff/**`, `/admin/**`, `/engineer/**`, `/technician/**`)
+  - `consumerVerifyToken` — 5-min consumer verification JWT (to be opted in per-endpoint by `/consumer/**` controllers when Phase 5 lands)
+- **`OpenApiExportIT` (new Failsafe test, `src/test/java/com/example/complaints/openapi/`).** Boots the app on a random port via Testcontainers + Postgres, GETs `/v3/api-docs`, writes the response to **`docs/openapi.json`** (project root relative).
+  - Reproducible contract snapshot — FE `pnpm api:gen` reads the committed file; no running backend needed.
+  - Uses plain `java.net.http.HttpClient` (Java 21 try-with-resources) — `TestRestTemplate` was repackaged in SB 4.1 and we'd rather not chase its module.
+- **`docs/openapi.json` checked in** — OpenAPI 3.0.1, 23 paths covering Stage 1 (`/staff/auth/*`, `/staff/me`) + Stage 2 (`/staff/masterdata/*`, `/admin/masterdata/*`), with both security schemes wired up. Cleared the Stage 1 follow-up "OpenAPI security scheme".
+
+#### Incidents fixed during implementation
+
+| # | Symptom | Root cause | Fix |
+|---|---------|-----------|-----|
+| 1 | `import org.springframework.boot.test.web.client.TestRestTemplate` would not resolve. | SB 4.1 repackaged or moved `TestRestTemplate`; the dependency that exposes it is no longer transitive via the slice deps we already pull in, and we don't want to add another starter just for this single use. | Skipped `TestRestTemplate` entirely. The IT uses `java.net.http.HttpClient` against `@LocalServerPort` (which itself moved to `org.springframework.boot.test.web.server.LocalServerPort` in SB 4.1 — noted for future ITs). |
+
+#### Tests added
+
+- `openapi/OpenApiExportIT` — 1 IT. Both an assertion (`200`, body contains `"openapi"`) **and** a build artifact producer (writes `docs/openapi.json`). Running `./mvnw verify` keeps the snapshot in sync with the live spec; CI will fail if the spec stops being valid JSON or the server stops booting.
+
+No unit tests — there is no business logic to mock; the value is in the live spec round-trip.
+
+#### Build status
+
+```
+[INFO] Tests run: 19, Failures: 0, Errors: 0  (Surefire — unit)
+[INFO] Tests run:  2, Failures: 0, Errors: 0  (Failsafe — IT; ComplaintsApplicationIT + OpenApiExportIT)
+[INFO] BUILD SUCCESS
+docs/openapi.json — 17 KB, 23 paths, schemes: [bearerAuth, consumerVerifyToken]
+```
+
+#### Carry-overs / known follow-ups (backend side)
+
+- **Per-endpoint security overrides.** Once `/consumer/**` controllers land (Phase 5), they must override the global `bearerAuth` requirement with `@SecurityRequirement(name = "consumerVerifyToken")` at the controller / method level so the FE generates the correct typed clients.
+- **Spec drift CI guard.** Today the IT *writes* `docs/openapi.json`. A future CI step should also **diff** against the committed copy and fail the build on uncommitted spec changes (forces "regenerate FE bindings before merging" hygiene). Track for Phase 7.
+- **Frontend orval pipeline** — owned by the `complaints-frontend` window. Steps: (a) add `orval` + transport in `packages/api`, (b) wire `pnpm api:gen` in Turborepo, (c) replace the placeholder `packages/api/src/index.ts` with the generated re-exports, (d) verify `apps/web` still builds.
 
 ---
 
