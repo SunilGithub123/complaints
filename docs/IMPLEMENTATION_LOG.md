@@ -477,7 +477,95 @@ ArchUnit strict mode still on; all 5 boundary rules green (the new `SubdivisionS
 
 ---
 
-### Stage 7 · Frontend admin write screens + staff user management — ☐ not started
+### Stage 7 · Frontend admin write screens + staff user management — ✅ 2026-06-22 (no backend changes required)
+
+> Stage 7 was **frontend-led** (masterdata admin write screens + `/admin/staff`
+> in `apps/web`). Source of truth for the FE-side scope, incidents, tests, and
+> build status is
+> [`complaints-frontend/docs/IMPLEMENTATION_LOG.md`](../../complaints-frontend/docs/IMPLEMENTATION_LOG.md)
+> (Stage 7 entry).
+
+#### Backend impact
+
+- **Zero code changes on the backend.** The admin write surface was already
+  fully covered by Stages 2 + 5 + 6 — every endpoint and every error code the
+  FE consumed in Stage 7 was already shipped, OpenAPI'd, and tested:
+  - **Masterdata admin writes** (Stage 2):
+    `/api/v1/admin/masterdata/{subdivisions,distribution-centers,categories}`
+    `POST` / `PUT` / `POST /{id}/{activate,deactivate}`.
+  - **Masterdata deactivation guardrails** (Stage 6): `SUBDIVISION_HAS_ACTIVE_DCS`,
+    `SUBDIVISION_HAS_ACTIVE_STAFF`, `DC_HAS_ACTIVE_STAFF` — surfaced by the FE as
+    non-blocking warning toasts, exactly as the Stage 6 carry-over predicted.
+  - **Staff user management** (Stage 5): the 7-endpoint `/api/v1/admin/staff/**`
+    surface plus the 5 new staff error codes (`EMPLOYEE_ID_TAKEN`,
+    `STAFF_NOT_FOUND`, `STAFF_SCOPE_MISMATCH`, `STAFF_ROLE_FIELDS_INVALID`,
+    `DC_NOT_IN_SUBDIVISION`, `CANNOT_DEACTIVATE_SELF`,
+    `ADMIN_ALREADY_EXISTS_FOR_SUBDIV`, `ENGINEER_ALREADY_EXISTS_FOR_DC`) all
+    behaved as documented under FE-driven happy + unhappy paths.
+- **No new BE incidents.** The one-time temp-password reveal, the
+  partial-unique guardrails (one active ADMIN per subdivision, one active
+  ENGINEER per DC), the self-protection rule on
+  deactivate / reset-password, and the `RequireRole=ADMIN` route gate on
+  `/api/v1/admin/**` all behaved end-to-end against the FE flows without
+  needing a tweak.
+
+#### FE half summary (cross-referenced)
+
+- Masterdata admin write screens (Subdivisions, Distribution Centres,
+  Categories) with create / edit dialogs + activate / deactivate row actions.
+  The three Stage-6 deactivation guardrail codes surface as **non-blocking
+  warning toasts** so the row stays interactive.
+- `/admin/staff` — server-paginated list with `role` / `distributionCenterId`
+  / `enabled` filters; create flow with the **one-time temp-password reveal**
+  (asserted by test to leave no `localStorage` trace); edit; activate /
+  deactivate; reset-password. Destructive actions hidden on the
+  current admin's own row (self-protection mirror).
+- **Zero new npm deps** — hand-rolled `Dialog` (native `<dialog>`),
+  `Select`, and Zustand-backed `Toast` instead of Radix. Saved ~16 KB
+  gzipped vs adopting Radix.
+- **i18n** — full EN + MR coverage for all new strings + **13 new BE error
+  codes** translated via `mapApiError`. Marathi parity verified by code
+  review (CI guard still tracked for Phase 7).
+- **Gates** — `pnpm -w typecheck` ✅, `pnpm -w test` ✅ (8/8 incl. 4 new:
+  2× `StaffFormDialog`, 1× `TempPasswordDialog` asserting no `localStorage`
+  leak, 1× `SubdivisionsAdminScreen` guardrail toast), `pnpm -w build` ✅
+  at **133.09 KB gzipped entry chunk** (180 KB budget · **46.91 KB
+  headroom** · +3.18 KB vs Stage 4).
+- **FE incidents fixed in flight**: `jsdom` missing `HTMLDialogElement.showModal`
+  → guarded fallback to the `open` attribute; missing
+  `getListStaffQueryKey` re-export in `@complaints/api`; ambiguous
+  `findByText` (2 matches) → `findAllByText` in one test.
+
+#### Carry-overs that touch backend (or BE+FE jointly)
+
+These are tracked here so the BE side doesn't lose sight of them; full
+FE-side list lives in the FE log.
+
+- **Cleared in Stage 7**:
+  - All 13 new BE error codes from Stages 5 + 6 now have EN + MR
+    translations on the FE. Marathi parity CI guard (Phase 7) is now
+    the only remaining gap.
+- **Still open**:
+  - **`apps/web` ESLint script** is still uninstalled (a Phase 0 FE gap that
+    long predates this stage). No backend implication; tracked entirely on
+    the FE side.
+  - **Orval numeric-suffix aliases** (`create_1`, `deactivate_2`, etc.) remain
+    positionally brittle. **Backend implication:** any reorder of
+    `@Operation` declarations in our admin controllers can silently rename FE
+    hooks. Mitigation today is a comment in the generated index + a manual
+    re-verify on regeneration. **Real fix** is on the BE side — add explicit
+    `operationId = "createSubdivision"` (etc.) to every `@Operation`
+    annotation so springdoc emits stable IDs. Slotting into Phase 7 next to
+    the OpenAPI spec-drift CI guard from Stage 3.
+  - **Playwright + axe-core E2E coverage** for the admin write flows is
+    deferred to the Phase 2 CI hardening slice (which we just deferred too,
+    per the Stage 6 / GHA plan). When it lands, the same Testcontainers boot
+    we use for `*IT` can serve as the E2E backend target.
+  - **Spec-drift CI guard** (still tracked from Stage 3 + Stage 6): becomes
+    higher value now that the FE is fully consuming the v1 admin surface —
+    any unintended response shape change is a real FE break.
+
+---
 
 ### Stage 8 · Frontend profile editor + proactive `useMe` at boot — ☐ not started
 
