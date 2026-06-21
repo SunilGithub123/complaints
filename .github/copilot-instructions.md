@@ -48,12 +48,84 @@ Cross-package rules (enforced by ArchUnit tests under `src/test/java/.../archite
 - Endpoints under `/consumer/**` are gated by `ConsumerVerificationFilter` (5-min token, not the JWT filter).
 - Endpoints under `/staff/**`, `/admin/**`, `/engineer/**`, `/technician/**` are gated by `JwtAuthFilter` + `PasswordResetRequiredFilter`.
 
-### Naming
+### Naming conventions
 
-- Class suffixes: `Controller`, `Service`, `Repository`, `Mapper`, `Request`, `Response`, `Event`, `Exception`.
-- Methods: imperative verbs (`assignToTechnician`, `markBreached`), no `getXxxData` / `doSomething`.
-- Constants: `SCREAMING_SNAKE_CASE`.
-- Tests: `*Test` for unit, `*IT` for integration (Testcontainers).
+**Files & types**
+
+| Kind | Convention | Example |
+|------|------------|---------|
+| Class / interface / enum / record | `PascalCase`, noun phrase | `ComplaintAssignmentService`, `UserRole`, `LoginRequest` |
+| Class suffixes — **required** when the type fits the role | `Controller`, `Service`, `Repository`, `Mapper`, `Filter`, `Config`, `Properties`, `Factory`, `Validator`, `Listener`, `Runner` | `JwtFactory`, `SecurityConfig`, `JwtProperties` |
+| DTO suffixes — **required** | `Request`, `Response`, `Summary`, `View` | `ChangePasswordRequest`, `StaffSummaryResponse` |
+| Event / Exception suffixes — **required** | `Event`, `Exception` | `ComplaintAssignedEvent`, `BusinessException` |
+| Test classes | unit → `*Test`; integration (Docker / Testcontainers) → `*IT` | `StaffAuthServiceTest`, `ComplaintsApplicationIT` |
+| Flyway migrations | `V<major>.<minor>__<snake_case>.sql`; dev-only seed migrations start at `V1000.x` | `V1.3__add_updated_at_trigger.sql`, `V1000.0__seed_dev_data.sql` |
+
+**Members**
+
+| Kind | Convention | Example |
+|------|------------|---------|
+| Method | `camelCase`, **imperative verb** (action) for commands; `findXxx` / `getXxx` for reads; **no** `doXxx`, `handleXxx`, `processXxx`, `executeXxx`, `manageXxx` | `assignToTechnician`, `markBreached`, `findByEmployeeId` |
+| Boolean methods / fields | `is…`, `has…`, `can…`, `should…` | `isActive`, `hasOpenComplaints`, `passwordResetRequired` |
+| Field / local / parameter | `camelCase` | `subdivisionId`, `accessToken` |
+| Constant (`static final`, enum value) | `SCREAMING_SNAKE_CASE` | `DEFAULT_PAGE_SIZE`, `ADMIN`, `IST_TIMEZONE` |
+| Generic type parameter | single uppercase letter or `PascalCase` ending in `T` | `T`, `K`, `EventT` |
+
+**Packages**
+
+- All lowercase, **no underscores**, **no camelCase**.
+- One module per top-level package under `com.example.complaints.<module>`; sub-packages are role-based (`controller`, `service`, `repository`, `model`, `dto`, `mapper`, `event`).
+- Avoid `util` / `helper` / `common` *inside* a module — those names are reserved for the shared `com.example.complaints.common` package.
+
+**REST URLs**
+
+- `kebab-case` segments, plural resource nouns: `/api/v1/admin/masterdata/distribution-centers/{id}/activate`.
+- Path parameter names match the segment: `{id}`, `{subdivisionId}`, `{complaintNumber}`.
+- Query parameters in `camelCase`: `?subdivisionId=…&page=0&size=20`.
+- Verbs in URLs only for non-CRUD state transitions: `/activate`, `/deactivate`, `/assign`, `/resolve`, `/cancel`. **Never** `/get-…`, `/list-…`, `/create-…`.
+
+**Database**
+
+- Table & column names in `snake_case`, singular table names: `user_account`, `complaint_category`, `distribution_center`.
+- PKs are `id BIGINT`; FKs are `<referenced_table>_id` (e.g. `subdivision_id`).
+- Boolean columns prefixed `is_` only when needed for disambiguation (`enabled`, `revoked` are fine; `is_active` vs `active` — pick one per table and stay consistent).
+- Indexes: `ix_<table>_<col(s)>`; unique: `ux_<table>_<col(s)>`; partial unique: `ux_<table>_<col>_<predicate_short>`.
+- FK constraint: `fk_<table>__<referenced_table>` (double underscore).
+
+### Code style
+
+**Java / Spring conventions enforced in review**
+
+1. **Constructor injection only** — `final` fields + Lombok `@RequiredArgsConstructor` on services/controllers/components. No field injection (`@Autowired` on fields), no setter injection.
+2. **Records are canonical** for DTOs, event payloads, value objects. **Do not** add Lombok to records — they already have a canonical constructor + `equals`/`hashCode`.
+3. **Validation lives on request records.** Use `jakarta.validation` annotations (`@NotBlank`, `@Size`, `@Pattern`, `@Min`, `@Max`, `@Email`) on record components. Controllers add `@Valid`; the `GlobalExceptionHandler` turns failures into `VALIDATION_FAILED`.
+4. **Time types:** prefer `java.time.Instant` for storage (`TIMESTAMPTZ`) and `OffsetDateTime` in IST for wire format. Convert via `common.util.DateUtils.toIst(...)` in mappers. **Never `java.util.Date`**, never `LocalDateTime` for stored values.
+5. **`Optional` only as a return type** — not as a field, not as a method parameter, not in collections.
+6. **Streams** — fine, but don't chain more than ~5 operations; extract intent into a named method. No `Collectors.toList()` — use `toList()`.
+7. **Exceptions** — services throw `BusinessException(ErrorCode.*)`. **Never** `RuntimeException`, **never** `IllegalStateException` for business rules. Catch the narrowest type; **never** `catch (Exception e)` outside `GlobalExceptionHandler`.
+8. **Logging** — SLF4J via Lombok `@Slf4j`. Use parameterised messages: `log.info("Assigned complaint {} to technician {}", complaintId, technicianId);`. **Never** log secrets, OTPs, passwords, JWTs, refresh tokens, or full request bodies. `log.debug` is fine for development context; remove `log.info("...");` left over from debugging.
+9. **Null handling** — fields are non-null unless the DB column is nullable. Document nullability via `@Nullable` from Spring (`org.springframework.lang.Nullable`) on the rare return type. Don't sprinkle `Objects.requireNonNull` in services; rely on validation + DB constraints.
+10. **Magic numbers / strings** — extract to a `private static final` constant or an enum the first time they appear in business logic. Token TTLs, rate-limit bucket sizes, page-size caps, etc.
+11. **`@Transactional`** — on the service method, never on a controller, repository, or `@Configuration`. Read-only methods: `@Transactional(readOnly = true)`. Don't span more than one external call (HTTP / SMS / push) inside a transaction — extract those to after-commit hooks or events.
+12. **Method length** — aim ≤ 30 lines. If a service method grows past that, the bodies of its branches usually want to be `private` named methods inside the same service.
+13. **Class length** — aim ≤ 300 lines. If a service exceeds that, it's probably doing two things; split per business capability (`ComplaintAssignmentService` vs `ComplaintResolutionService`).
+14. **Imports** — no wildcard imports (`import a.b.*`). Order: `java.*`, `javax.* / jakarta.*`, third-party, project. The IDE handles this; don't fight it.
+15. **Comments** — explain *why*, not *what*. Javadoc on public service methods + REST endpoints; `// inline` only when the reason isn't obvious from the code. Delete commented-out code.
+16. **TODO** — only with an owner + ticket reference: `// TODO(sunil, #123): switch to async once notification module lands`. No anonymous TODOs.
+
+**Spring-specific style**
+
+- One bean per `@Configuration` `@Bean` method; no factory methods returning multiple beans.
+- Properties classes are `record`s annotated `@ConfigurationProperties(prefix = "…")` and registered via `@ConfigurationPropertiesScan` (not `@EnableConfigurationProperties` per class).
+- `@Cacheable` / `@CacheEvict` go on the service method; cache names declared once in `CaffeineCacheConfig`. No string-literal cache names sprinkled in services — use a constant.
+- Scheduled jobs: `@Scheduled(cron = "...", zone = "Asia/Kolkata")`. Always specify the zone explicitly.
+- Tests: `@DisplayName` for human-readable test names. Prefer slice tests (`@WebMvcTest`, `@DataJpaTest`) over full `@SpringBootTest`. Mock with Mockito `@MockitoBean` (SB 4.1) — not the deprecated `@MockBean`.
+
+**Formatting**
+
+- 4-space indent, no tabs. Soft line wrap at ~120 chars (don't manually wrap fluent builder chains tighter than that).
+- Braces always — no single-line `if (x) return;` without braces.
+- One blank line between methods, none between consecutive `private static final` constants.
 
 ## Design principles — SOLID, but don't over-engineer
 

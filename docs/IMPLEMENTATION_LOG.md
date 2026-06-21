@@ -1,7 +1,12 @@
-# Implementation Log
+# Implementation Log — backend (`complaints`)
 
-> Living record of what has actually shipped, per phase / per stage. Update at the
-> end of every stage. **Phases and stages here track [`ROADMAP.md`](ROADMAP.md).**
+> Living record of what has actually shipped on the **backend** side, per phase / per
+> stage. Update at the end of every stage. **Phases and stages here track [`ROADMAP.md`](ROADMAP.md).**
+>
+> **Frontend has its own log** at `complaints-frontend/docs/IMPLEMENTATION_LOG.md`.
+> Stages that span both repos (e.g. Stage 3 OpenAPI contract export → orval codegen)
+> appear in both logs; each log is the source of truth for its own slice and
+> cross-links to the other.
 >
 > Format per entry:
 > 1. **Scope delivered** — packages / files / endpoints / migrations.
@@ -16,8 +21,8 @@
 ## Phase 0 — Scaffolds (done before this log existed)
 
 - **Backend** (`complaints/`): Maven single-module, Spring Boot 4.1, Java 21, IST timezone wiring, `ApiResponse` / `ErrorResponse` / `PageResponse`, `ErrorCode` enum + `BusinessException` + `GlobalExceptionHandler`, Caffeine cache, springdoc OpenAPI, security skeleton, Flyway with `V1.0__init_schema.sql` + `V1.1__seed_master_data.sql` + `V1.2__seed_bootstrap_admin.sql` placeholder, dev-only `V1000.0__seed_dev_data.sql`, ArchUnit `PackageBoundaryTest`, Testcontainers `ComplaintsApplicationIT` smoke.
-- **Frontend** (`complaints-frontend/`): pnpm + Turborepo workspaces, `apps/web` (React 19 + Vite 6 + TS), `packages/{api,i18n,ui-tokens,utils}` stubs, `@complaints/utils` exporting `IST_TIMEZONE` + `formatIstDateTime`, Vite dev-proxy to `/api`, `.github/copilot-instructions.md`, `.github/PULL_REQUEST_TEMPLATE.md`, `AGENTS.md`, `CONTRIBUTING.md`.
-- **Build status**: backend `./mvnw verify` green; frontend `pnpm --filter web build` 195 KB JS / 61 KB gzipped (under 180 KB budget).
+- **Frontend scaffolds** are tracked in `complaints-frontend/docs/IMPLEMENTATION_LOG.md` (Phase 0 entry there).
+- **Build status (backend)**: `./mvnw verify` green.
 
 ---
 
@@ -234,13 +239,15 @@ None. Hibernate's `@Generated` integration worked first-try with `insertable=fal
 
 ---
 
-### Stage 3 · Frontend `packages/api` (orval codegen) — 🟡 backend slice done 2026-06-20
+### Stage 3 · OpenAPI contract export (backend half) — ✅ 2026-06-20
 
-> Stage 3 spans **both** repos. The backend side ships the reproducible OpenAPI
-> contract; the frontend side wires orval against it. Frontend work continues in
-> `complaints-frontend/`.
+> Stage 3 spans **both** repos. This is the backend half — shipping a
+> reproducible OpenAPI snapshot that the FE codegen consumes. The frontend
+> half (orval pipeline, custom `fetch` transport, generated TanStack Query
+> hooks) lives in `complaints-frontend/docs/IMPLEMENTATION_LOG.md` and is
+> the source of truth for that work.
 
-#### Scope delivered (backend slice)
+#### Scope delivered
 
 - **`OpenApiConfig` gained Bearer auth schemes.** Declared two HTTP-bearer security schemes that the FE codegen (and Swagger UI's "Authorize" button) understand:
   - `bearerAuth` — staff access JWT (default global requirement, applied to `/staff/**`, `/admin/**`, `/engineer/**`, `/technician/**`)
@@ -258,9 +265,7 @@ None. Hibernate's `@Generated` integration worked first-try with `insertable=fal
 
 #### Tests added
 
-- `openapi/OpenApiExportIT` — 1 IT. Both an assertion (`200`, body contains `"openapi"`) **and** a build artifact producer (writes `docs/openapi.json`). Running `./mvnw verify` keeps the snapshot in sync with the live spec; CI will fail if the spec stops being valid JSON or the server stops booting.
-
-No unit tests — there is no business logic to mock; the value is in the live spec round-trip.
+- `openapi/OpenApiExportIT` — 1 IT. Both an assertion (`200`, body contains `"openapi"`) **and** a build-artifact producer (writes `docs/openapi.json`). Running `./mvnw verify` keeps the snapshot in sync with the live spec; CI will fail if the spec stops being valid JSON or the server stops booting. No unit tests — there is no business logic to mock; the value is in the live spec round-trip.
 
 #### Build status
 
@@ -271,15 +276,59 @@ No unit tests — there is no business logic to mock; the value is in the live s
 docs/openapi.json — 17 KB, 23 paths, schemes: [bearerAuth, consumerVerifyToken]
 ```
 
-#### Carry-overs / known follow-ups (backend side)
+> **FE half status (cross-referenced from `complaints-frontend/docs/IMPLEMENTATION_LOG.md`):** ✅ landed same day. `packages/api` orval pipeline + `customFetch` transport + 2 Vitest cases green; `apps/web` build 61.18 KB gzipped (budget 180 KB).
+
+#### Carry-overs / known follow-ups
 
 - **Per-endpoint security overrides.** Once `/consumer/**` controllers land (Phase 5), they must override the global `bearerAuth` requirement with `@SecurityRequirement(name = "consumerVerifyToken")` at the controller / method level so the FE generates the correct typed clients.
 - **Spec drift CI guard.** Today the IT *writes* `docs/openapi.json`. A future CI step should also **diff** against the committed copy and fail the build on uncommitted spec changes (forces "regenerate FE bindings before merging" hygiene). Track for Phase 7.
-- **Frontend orval pipeline** — owned by the `complaints-frontend` window. Steps: (a) add `orval` + transport in `packages/api`, (b) wire `pnpm api:gen` in Turborepo, (c) replace the placeholder `packages/api/src/index.ts` with the generated re-exports, (d) verify `apps/web` still builds.
+- **Snapshot sync to FE repo.** Today this is a manual `cp ../complaints/docs/openapi.json packages/api/openapi.json`. Automate alongside the spec-drift guard above.
 
 ---
 
-### Stage 4 · Frontend `apps/web` (staff login + master-data screens) — ☐ not started
+### Stage 4 · Backend support for frontend feature slice — ✅ 2026-06-21 (no backend changes required)
+
+> Stage 4 was **frontend-led** (staff login + force-change-password + master-data
+> read screens in `apps/web`). Source of truth for the FE-side scope, incidents,
+> tests, and build status is
+> [`complaints-frontend/docs/IMPLEMENTATION_LOG.md`](../../complaints-frontend/docs/IMPLEMENTATION_LOG.md)
+> (Stage 4 entry).
+
+#### Backend impact
+
+- **Zero code changes on the backend.** The auth + masterdata APIs shipped in
+  Stages 1–2 covered every screen the FE built (`/staff/auth/login`,
+  `/staff/auth/refresh`, `/staff/auth/change-password`, `/staff/auth/logout`,
+  `/staff/me`, `/staff/masterdata/{subdivisions,distribution-centers,categories}`).
+- **No new BE incidents.** The 401 → refresh-once contract added in Stage 1
+  worked unchanged with the FE's `customFetch` transport; the
+  `passwordResetRequired` allow-list (`/change-password`, `/logout`, `/me`)
+  enforced by `PasswordResetRequiredFilter` was mirrored exactly by the FE's
+  `RequirePasswordChanged` guard — confirmed by the manual smoke loop documented
+  in the FE log.
+
+#### FE half summary (cross-referenced)
+
+- Tailwind v4 (`@tailwindcss/vite`) + hand-authored shadcn-style primitives (only the 8 actually used); skipped `dropdown-menu`.
+- Zustand auth store + boot-time `setAuthHooks(...)` wiring; `auth:logout` listener clears + navigates.
+- React Router 7 with three guard layers (`RequireAuth` → `RequirePasswordChanged` → `DashboardLayout`); `RequireRole` exported for Phase 2.
+- Screens: `LoginScreen`, `ChangePasswordScreen`, `DashboardLayout`, `Home`, `SubdivisionsScreen`, `DistributionCentersScreen`, `CategoriesScreen`, `NotFound`. `MasterdataTable<TRow>` extracted **after the third** masterdata screen (per the "second-time abstraction" rule).
+- i18n: `@complaints/i18n` now ships an `i18next` singleton with full EN + MR catalogues; MR mirrors EN key tree exactly.
+- 4 Vitest + RTL cases pass (Login happy/unhappy, RequirePasswordChanged on/off).
+- Bundle: now sits with **~50 KB of headroom** against the 180 KB gzipped budget.
+
+#### Carry-overs that touch backend (or BE+FE jointly)
+
+These are tracked here so the BE side doesn't lose sight of them; full FE-side
+list lives in the FE log.
+
+- **`useMe` proactive call at boot is deferred (Phase 2).** Until then, the FE hydrates `staff` from `localStorage` and only revalidates on the next 401. If we ever change the staff-summary shape, FE clients will keep a stale `staff` object across refreshes until a protected call fails. **Backend implication:** keep `StaffSummaryResponse` strictly additive on v1; any field removal is a breaking change for cached FE state. Track alongside the existing Phase 7 "spec drift CI guard" follow-up.
+- **Marathi parity CI guard (Phase 7).** Today the EN/MR key trees match by code review only. When CI lands, the same job should also assert backend `ErrorCode` strings have an `mr` translation in `@complaints/i18n` for any code surfaced to consumers.
+- **`PasswordResetRequiredFilter` allow-list is FE-mirrored.** Any change to the allow-list (`/change-password`, `/logout`, `/me`) is now a coordinated BE+FE change. Document in TECHNICAL_DESIGN §5 once we touch it again.
+
+---
+
+## Phase 2 — Admin write screens + staff user management — ☐ not started
 
 ---
 

@@ -13,7 +13,7 @@
 
 | You need to know… | File |
 |-------------------|------|
-| Code conventions, hard rules, test policy | [`.github/copilot-instructions.md`](.github/copilot-instructions.md) |
+| Code conventions, hard rules, test policy | [`.github/copilot-instructions.md`](.github/copilot-instructions.md) — see **Naming conventions** + **Code style** sections before writing code |
 | Business rules / user roles | [`docs/BRD.md`](docs/BRD.md) |
 | Architecture / API contracts / packages | [`docs/TECHNICAL_DESIGN.md`](docs/TECHNICAL_DESIGN.md) |
 | **What has actually shipped + incidents per stage** | [`docs/IMPLEMENTATION_LOG.md`](docs/IMPLEMENTATION_LOG.md) |
