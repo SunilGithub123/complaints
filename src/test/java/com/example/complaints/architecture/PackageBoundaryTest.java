@@ -34,8 +34,11 @@ class PackageBoundaryTest {
     @ArchTest
     static final ArchRule controllers_must_not_serialize_entities =
             noClasses().that().resideInAPackage("..controller..")
-                    .should().dependOnClassesThat().resideInAPackage("..model..")
-                    .because("Controllers must serialize DTOs, never JPA entities.");
+                    .should().dependOnClassesThat(
+                            resideInAPackage("..model..").and(DescribedPredicate.<JavaClass>describe(
+                                    "are not enums", clazz -> !clazz.isEnum())))
+                    .because("Controllers must serialize DTOs, never JPA entities. Enums in "
+                            + "..model.. (e.g. UserRole) are value types and safe to cross the wire.");
 
     /**
      * A module's classes may not depend on another module's {@code ..repository..} package.

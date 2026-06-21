@@ -39,6 +39,11 @@ public enum ErrorCode {
     EMPLOYEE_ID_TAKEN                  (HttpStatus.CONFLICT,          "Employee ID already in use"),
     ADMIN_ALREADY_EXISTS_FOR_SUBDIV    (HttpStatus.CONFLICT,          "An active admin already exists for this subdivision"),
     ENGINEER_ALREADY_EXISTS_FOR_DC     (HttpStatus.CONFLICT,          "An active engineer already exists for this distribution center"),
+    STAFF_NOT_FOUND                    (HttpStatus.NOT_FOUND,         "Staff account not found"),
+    STAFF_SCOPE_MISMATCH               (HttpStatus.FORBIDDEN,         "Staff account is outside your subdivision"),
+    STAFF_ROLE_FIELDS_INVALID          (HttpStatus.BAD_REQUEST,       "Staff role and scope fields are inconsistent"),
+    DC_NOT_IN_SUBDIVISION              (HttpStatus.CONFLICT,          "Distribution center does not belong to the chosen subdivision"),
+    CANNOT_DEACTIVATE_SELF             (HttpStatus.CONFLICT,          "You cannot deactivate or reset your own account"),
 
     // ---------- Master data ----------
     SUBDIVISION_NOT_FOUND          (HttpStatus.NOT_FOUND,             "Subdivision not found"),

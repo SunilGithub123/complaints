@@ -328,7 +328,93 @@ list lives in the FE log.
 
 ---
 
-## Phase 2 — Admin write screens + staff user management — ☐ not started
+## Phase 2 — Admin write screens + staff user management
+
+### Stage 5 · Backend staff user management — ✅ 2026-06-21
+
+#### Scope delivered
+
+**DTOs** (`com.example.complaints.auth.dto`, all records)
+- `CreateStaffRequest`, `UpdateStaffRequest`, `StaffListItemResponse`, `ResetStaffPasswordResponse` — `jakarta.validation` on inputs (`@NotBlank`, `@Pattern`, `@Email`, `@NotNull`).
+- `ResetStaffPasswordResponse` documents the **never-log** rule for the temporary password it carries.
+
+**Persistence**
+- `UserAccountRepository.search(subdivisionId, role?, distributionCenterId?, enabled?, Pageable)` — single `@Query` with `IS NULL` short-circuits. Specification API not needed yet (4 fixed filters, one entry point) per "add the abstraction the second time you need it".
+
+**Mapper** (`auth.mapper.UserAccountMapper`)
+- New `toListItem(UserAccount)` — full admin projection. Timestamps go through `DateUtils.toIst(...)` so the wire format is IST. Never exposes `passwordHash`.
+
+**Service** (`auth.service.StaffAdminService`, new — separate from `StaffAuthService`, SRP)
+- `list`, `get`, `create`, `update`, `setActive(active)`, `resetPassword`.
+- **Auto-scoped** to the caller's subdivision via `requireSubdivisionInScope(...)`; cross-subdivision attempts → `STAFF_SCOPE_MISMATCH`.
+- **Partial-unique guardrails** enforced in service before they hit the DB so callers get a clean `BusinessException` instead of a `DataIntegrityViolationException`:
+  - ADMIN: at most one active per subdivision (also enforced on **re-activation**).
+  - ENGINEER: at most one active per DC (enforced on create, DC reassignment, and re-activation).
+  - TECHNICIAN: many per DC allowed.
+- **Role / scope field validation** — ADMIN must have `distributionCenterId == null`; ENGINEER / TECHNICIAN require it (`STAFF_ROLE_FIELDS_INVALID`).
+- **Cross-module scope check** — when DC is provided, the chosen DC must belong to the chosen subdivision (`DC_NOT_IN_SUBDIVISION`).
+- **Self-protection** — admin cannot deactivate or reset their own account (`CANNOT_DEACTIVATE_SELF`). Admins rotate their own password via `/staff/auth/change-password`.
+- **Session revocation on side effects** — deactivation and password reset both call `RefreshTokenRepository.revokeAllForUser(id)` so live sessions die immediately.
+- **Temporary-password generation** — `SecureRandom`, 16 chars from a no-ambiguous-glyph alphabet (drops `0/O 1/l/I`), mixes case + a special. Returned once in `ResetStaffPasswordResponse`. Plaintext never logged or stored.
+
+**Controller** (`auth.controller.StaffAdminController`, new)
+- Mounted under `/api/v1/admin/staff` → already gated by `SecurityConfig`'s `hasRole("ADMIN")` matcher.
+- 7 endpoints, all annotated with springdoc `@Operation` / `@Tag` so FE codegen sees them:
+  - `GET /api/v1/admin/staff` (paged, optional `role` / `distributionCenterId` / `enabled` filters)
+  - `GET /api/v1/admin/staff/{id}`
+  - `POST /api/v1/admin/staff` (create → returns one-time temp password)
+  - `PUT /api/v1/admin/staff/{id}` (profile + DC reassignment)
+  - `POST /api/v1/admin/staff/{id}/activate`
+  - `POST /api/v1/admin/staff/{id}/deactivate`
+  - `POST /api/v1/admin/staff/{id}/reset-password` (returns one-time temp password)
+
+**ErrorCodes added** (`common.exception.ErrorCode`)
+- `STAFF_NOT_FOUND` (404), `STAFF_SCOPE_MISMATCH` (403), `STAFF_ROLE_FIELDS_INVALID` (400), `DC_NOT_IN_SUBDIVISION` (409), `CANNOT_DEACTIVATE_SELF` (409).
+
+#### Incidents fixed during implementation
+
+| # | Symptom | Root cause | Fix |
+|---|---------|-----------|-----|
+| 1 | `PackageBoundaryTest.controllers_must_not_serialize_entities` failed once `StaffAdminController.list(...)` exposed `UserRole` (an enum living in `auth.model`) as a query parameter. | The rule literally forbade any `..controller.. → ..model..` reference. The rule's **intent** is "no JPA entities on the wire"; an enum is a value type that's safe to serialize. | Refined the rule to except `enum` classes: `dependOnClassesThat(resideInAPackage("..model..").and(clazz -> !clazz.isEnum()))`. `UserAccount` / `Subdivision` / `DistributionCenter` / `ComplaintCategory` (real entities) are still caught. |
+| 2 | Compile error: `ApiResponse.success(...)` doesn't exist. | Misremembered the helper name — the existing common DTO exposes `ApiResponse.ok(T)`, not `success(T)`. | Bulk-replaced `success(` → `ok(` in the new controller. (Not promoted to a coding-instructions update — the existing convention is consistent and the IDE would have caught it.) |
+
+#### Tests added
+
+Minimum-test policy applied: 1 happy + 1 unhappy per representative behavior.
+
+- `auth/service/StaffAdminServiceTest` — 2 tests:
+  - happy `create` (ENGINEER in admin's own subdivision + DC → returns 16-char temp password, persists row)
+  - ENGINEER without `distributionCenterId` → `STAFF_ROLE_FIELDS_INVALID`
+- `auth/controller/StaffAdminControllerTest` (`@WebMvcTest`) — 2 tests:
+  - happy `POST /api/v1/admin/staff` → 200 + envelope exposes the temp password
+  - blank `employeeId` → 400 + `VALIDATION_FAILED`
+
+(Self-deactivation, cross-subdivision rejection, ADMIN partial-unique, and ENGINEER-per-DC partial-unique are all covered by the existing repository-level `@Query` finders + service logic; per the "would I miss this if it broke in prod tomorrow?" rule we'd add slice tests only when one of these branches lands a new edge case.)
+
+#### Build status
+
+```
+[INFO] Tests run: 23, Failures: 0, Errors: 0  (Surefire — unit; +4 from Stage 3 baseline)
+[INFO] Tests run:  2, Failures: 0, Errors: 0  (Failsafe — IT; ComplaintsApplicationIT + OpenApiExportIT)
+[INFO] BUILD SUCCESS
+docs/openapi.json — now 28 paths (was 23); +5 admin/staff routes, security schemes unchanged.
+```
+
+#### Carry-overs / known follow-ups
+
+- **Update FE `packages/api/openapi.json` snapshot.** Manual `cp ../complaints/docs/openapi.json packages/api/openapi.json` and re-run `pnpm api:gen` before Stage 7 (FE admin screens) starts. Spec-drift CI guard still tracked for Phase 7.
+- **Audit events** — every staff write (create / update / activate / deactivate / reset-password) should publish a `StaffAccountChangedEvent` for the audit log. Deferred to the `audit` module (Phase 7). For now, INFO-level structured logs carry actor + target + action.
+- **Bulk operations** — no `POST /admin/staff/bulk-import` yet (CSV). Deferred until there's real demand; the partial-unique guards make it tricky and the FE rarely needs it.
+- **MR / EN translations for the 5 new ErrorCodes** — coordinate with FE `@complaints/i18n` so the FE-side log's Marathi parity CI guard (when it lands) catches missing keys.
+- **`@DataJpaTest` for the dynamic `search(...)` query** — first non-derived query in the repository. Per the Stage 1 follow-up, this earns a slice IT. Adding it as the first item in Stage 6.
+
+---
+
+### Stage 6 · Backend masterdata deactivation guardrails — ☐ not started
+
+### Stage 7 · Frontend admin write screens + staff user management — ☐ not started
+
+### Stage 8 · Frontend profile editor + proactive `useMe` at boot — ☐ not started
 
 ---
 
