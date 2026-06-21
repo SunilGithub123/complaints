@@ -2,6 +2,7 @@ package com.example.complaints.masterdata.service;
 
 import com.example.complaints.auth.security.AuthenticatedStaff;
 import com.example.complaints.auth.model.UserRole;
+import com.example.complaints.auth.service.StaffLookupService;
 import com.example.complaints.common.dto.PageResponse;
 import com.example.complaints.common.exception.BusinessException;
 import com.example.complaints.common.exception.ErrorCode;
@@ -25,6 +26,7 @@ public class DistributionCenterService {
     private final DistributionCenterRepository repo;
     private final DistributionCenterMapper mapper;
     private final SubdivisionService subdivisions;
+    private final StaffLookupService staffLookup;
 
     @Transactional(readOnly = true)
     public PageResponse<DistributionCenterResponse> list(Long subdivisionId, Pageable pageable) {
@@ -81,6 +83,9 @@ public class DistributionCenterService {
     public DistributionCenterResponse setActive(AuthenticatedStaff me, Long id, boolean active) {
         DistributionCenter dc = load(id);
         requireSubdivisionInAdminScope(me, dc.getSubdivisionId());
+        if (!active && dc.isActive() && staffLookup.hasActiveStaffInDistributionCenter(id)) {
+            throw new BusinessException(ErrorCode.DC_HAS_ACTIVE_STAFF);
+        }
         dc.setActive(active);
         return mapper.toResponse(dc);
     }

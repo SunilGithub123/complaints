@@ -1,5 +1,6 @@
 package com.example.complaints.masterdata.service;
 
+import com.example.complaints.auth.service.StaffLookupService;
 import com.example.complaints.common.dto.PageResponse;
 import com.example.complaints.common.exception.BusinessException;
 import com.example.complaints.common.exception.ErrorCode;
@@ -8,6 +9,7 @@ import com.example.complaints.masterdata.dto.SubdivisionRequest;
 import com.example.complaints.masterdata.dto.SubdivisionResponse;
 import com.example.complaints.masterdata.mapper.SubdivisionMapper;
 import com.example.complaints.masterdata.model.Subdivision;
+import com.example.complaints.masterdata.repository.DistributionCenterRepository;
 import com.example.complaints.masterdata.repository.SubdivisionRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.cache.annotation.CacheEvict;
@@ -22,6 +24,8 @@ public class SubdivisionService {
 
     private final SubdivisionRepository repo;
     private final SubdivisionMapper mapper;
+    private final DistributionCenterRepository distributionCenters;
+    private final StaffLookupService staffLookup;
 
     @Transactional(readOnly = true)
     public PageResponse<SubdivisionResponse> list(Pageable pageable) {
@@ -66,6 +70,15 @@ public class SubdivisionService {
     @CacheEvict(value = CaffeineCacheConfig.CACHE_SUBDIVISIONS, allEntries = true)
     public SubdivisionResponse setActive(Long id, boolean active) {
         Subdivision s = load(id);
+        if (!active && s.isActive()) {
+            // Guardrails on deactivation only — re-activation is always safe.
+            if (distributionCenters.existsBySubdivisionIdAndActiveTrue(id)) {
+                throw new BusinessException(ErrorCode.SUBDIVISION_HAS_ACTIVE_DCS);
+            }
+            if (staffLookup.hasActiveStaffInSubdivision(id)) {
+                throw new BusinessException(ErrorCode.SUBDIVISION_HAS_ACTIVE_STAFF);
+            }
+        }
         s.setActive(active);
         return mapper.toResponse(s);
     }

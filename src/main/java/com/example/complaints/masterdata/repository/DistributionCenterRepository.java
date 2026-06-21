@@ -11,5 +11,8 @@ public interface DistributionCenterRepository extends JpaRepository<Distribution
     Optional<DistributionCenter> findByCode(String code);
     boolean existsByCode(String code);
     Page<DistributionCenter> findBySubdivisionId(Long subdivisionId, Pageable pageable);
+
+    /** Used by {@code SubdivisionService.setActive(false)} to block deactivation while children are live. */
+    boolean existsBySubdivisionIdAndActiveTrue(Long subdivisionId);
 }
 

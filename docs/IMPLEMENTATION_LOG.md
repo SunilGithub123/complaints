@@ -111,6 +111,12 @@ Per minimum-test policy: 1 happy + 1 unhappy per behavior; no exhaustive matrice
 - **CHANGE_PASSWORD audit** — listener will be added with the `audit` module (Phase 7 per ROADMAP). For now, `lastLoginAt` is updated on successful login.
 - **Bootstrap admin row** — `fullName` is hard-coded to `"Bootstrap Admin"`; first thing the real admin will do is change password (forced) and edit profile (Phase 2 admin-user-mgmt).
 
+#### Post-stage hotfixes
+
+| # | Date | Symptom | Root cause | Fix |
+|---|------|---------|-----------|-----|
+| 1 | 2026-06-21 | `POST /staff/auth/change-password` returned `ApiResponse<StaffSummaryResponse>`. The access JWT issued at `/login` carried `passwordResetRequired = true` in its claims; that claim stayed baked-in until the client either re-logged-in or chained a manual `/refresh` call. FE had to do change-password → refresh → setSession; mobile and any 3rd-party client would have hit the same sharp edge. | The change-password endpoint was treated as a "profile update" returning only the staff summary, even though server-side state (the claim) had just gone stale. | Made change-password **rotate tokens server-side**. Service now revokes every refresh token belonging to the caller (kicks all other sessions) and immediately mints a fresh access + refresh pair against the updated user row via the same `issueTokenPair(...)` helper login uses. Return type flipped to `ApiResponse<LoginResponse>`. OpenAPI snapshot bumped — diff is contained to the change-password operation's response schema ref (`ApiResponseStaffSummaryResponse` → `ApiResponseLoginResponse`) plus the updated summary / description. FE will simplify `ChangePasswordScreen` to a single `setSession(response.data)` once it re-runs `pnpm api:gen` against the new spec (matches FE log Post-Stage-4 hotfix #2). 2 new unit tests added: token-pair rotation + old-refresh-token-rejected-after-change-password. |
+
 ---
 
 ### Stage 2 · Backend `masterdata` module — ✅ 2026-06-20
@@ -410,7 +416,66 @@ docs/openapi.json — now 28 paths (was 23); +5 admin/staff routes, security sch
 
 ---
 
-### Stage 6 · Backend masterdata deactivation guardrails — ☐ not started
+### Stage 6 · Backend masterdata deactivation guardrails — ✅ 2026-06-21
+
+#### Scope delivered
+
+**ErrorCodes added** (`common.exception.ErrorCode`)
+- `SUBDIVISION_HAS_ACTIVE_DCS` (409), `SUBDIVISION_HAS_ACTIVE_STAFF` (409), `DC_HAS_ACTIVE_STAFF` (409).
+
+**Persistence**
+- `DistributionCenterRepository.existsBySubdivisionIdAndActiveTrue(Long)` — derived finder; cheap existence check used by the subdivision deactivation guard.
+- `UserAccountRepository.existsBySubdivisionIdAndEnabledTrue(Long)` / `existsByDistributionCenterIdAndEnabledTrue(Long)` — derived finders; used by the new `StaffLookupService`.
+
+**Service** (new) — `auth.service.StaffLookupService`
+- Tiny read-only entry point exposing `hasActiveStaffInSubdivision(...)` / `hasActiveStaffInDistributionCenter(...)` to other modules. Lives in its own class (rather than on `StaffAdminService`) to break the would-be `StaffAdminService ↔ SubdivisionService / DistributionCenterService` constructor-injection cycle. Justified by the dependency cycle, not by speculative reuse — matches the "second-time abstraction" rule because both `SubdivisionService` and `DistributionCenterService` need it on day one.
+
+**Service updates** (`masterdata`)
+- `SubdivisionService.setActive(id, false)` — now refuses when (a) any DC under the subdivision is still active (`SUBDIVISION_HAS_ACTIVE_DCS`) or (b) any staff row scoped to the subdivision is still enabled (`SUBDIVISION_HAS_ACTIVE_STAFF`). Re-activation stays a no-op check.
+- `DistributionCenterService.setActive(me, id, false)` — refuses when any staff row references the DC and is still enabled (`DC_HAS_ACTIVE_STAFF`). Same scope check as before runs first; re-activation unaffected.
+- `ComplaintCategoryService.setActive` — left with an explicit `TODO(sunil, phase-3)` comment: the open-complaints guard cannot be enforced until the `complaint` module exists (Phase 3, per the Stage 2 carry-over).
+
+**Stage 5 follow-up cleared**
+- `UserAccountRepositoryIT` (`@DataJpaTest` + Testcontainers Postgres, replace=NONE) — first slice IT in the repo. Seeds two subdivisions + two DCs + 6 staff and asserts (a) subdivision scope alone returns the right rows + skips null filters and (b) role + DC + enabled filters narrow correctly. SB 4.1 packages: `org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest` and `org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase`.
+
+#### Incidents fixed during implementation
+
+| # | Symptom | Root cause | Fix |
+|---|---------|-----------|-----|
+| 1 | `UserAccountRepositoryIT` failed at compile: `package org.springframework.boot.test.autoconfigure.jdbc does not exist` and `AutoConfigureTestDatabase` / `DataJpaTest` symbols unresolved. | SB 4.1 split the test-slice autoconfig into module-specific packages — same pattern as the Stage 1 `@WebMvcTest` move documented there. | New import paths:<br>• `@DataJpaTest` → `org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest`<br>• `@AutoConfigureTestDatabase` → `org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase` (note `jdbc.test.autoconfigure`, not `test.autoconfigure.jdbc`). Added them to the unwritten "SB 4.1 import map" we maintain in this log. |
+| 2 | `UserAccountRepositoryIT.seed` failed: `DataIntegrityViolation … "user_account_subdivision_id_fkey"` for hard-coded subdivision IDs `1001`/`1002`. | Initial draft of the IT seeded `UserAccount` rows with fabricated subdivision/DC IDs; the schema has FKs to `subdivision(id)` and `distribution_center(id)`. | Inject `SubdivisionRepository` + `DistributionCenterRepository` into the IT, insert the parent rows first, and use the *returned* generated IDs in the staff seed. |
+| 3 | `docs/openapi.json` snapshot diff appeared even though Stage 6 added no endpoints. | Stage 1 post-stage hotfix (the change-password rotates-tokens change) updated the controller's `@Operation` description + response schema reference but never re-ran `OpenApiExportIT`, so the committed snapshot had drifted. | Re-snapshot picked up automatically when `./mvnw verify` ran. Confirms the "spec drift CI guard" follow-up from Stage 3 is real and worth doing — added a sentence to that carry-over below. |
+
+#### Tests added
+
+Minimum-test policy applied: 1 unhappy per new guardrail (happy paths share their shape with the existing `setActive(true)` cases already covered). Plus the Stage 5 follow-up repository IT.
+
+- `masterdata/service/SubdivisionServiceTest` — +1 test (`deactivate: blocked when the subdivision still has active DCs` → asserts `SUBDIVISION_HAS_ACTIVE_DCS` *and* that the entity stayed `active=true`).
+- `masterdata/service/DistributionCenterServiceTest` — +1 test (`deactivate: blocked when the DC still has active staff` → asserts `DC_HAS_ACTIVE_STAFF` *and* the entity stayed `active=true`).
+- `auth/repository/UserAccountRepositoryIT` — 2 IT tests (subdivision scope + null-filter skip; full filter combination narrows to a single row).
+
+The third subdivision-guardrail branch (`SUBDIVISION_HAS_ACTIVE_STAFF`) shares its code path with the active-DCs branch; per "would I miss this if it broke in prod tomorrow?" we didn't add a third near-identical mock test — the branch is one `if` away.
+
+#### Build status
+
+```
+[INFO] Tests run: 27, Failures: 0, Errors: 0  (Surefire — unit;  +4 from Stage 5 baseline)
+[INFO] Tests run:  4, Failures: 0, Errors: 0  (Failsafe — IT; ComplaintsApplicationIT + UserAccountRepositoryIT + OpenApiExportIT)
+[INFO] BUILD SUCCESS
+docs/openapi.json — re-snapshotted; only diff is the `/staff/auth/change-password` operation description that Stage 1's post-stage hotfix updated on the controller. Path count unchanged at 28.
+```
+
+ArchUnit strict mode still on; all 5 boundary rules green (the new `SubdivisionService → StaffLookupService` and `DistributionCenterService → StaffLookupService` edges are cross-module *service*-to-*service*, which the rules permit).
+
+#### Carry-overs / known follow-ups
+
+- **Category deactivation guard** (`TODO(sunil, phase-3)`) — once the `complaint` module ships, add a `ComplaintRepository.existsByCategoryIdAndStatusIn(OPEN_STATUSES)` check + `CATEGORY_HAS_OPEN_COMPLAINTS` (409). The TODO comment in `ComplaintCategoryService.setActive` is the trail head.
+- **DC deactivation second guard** — same Phase-3 follow-up should add a "no open complaints under this DC" check alongside the existing staff check. Today the staff check is enough because every open complaint has a technician, but that invariant becomes brittle once admins can reassign.
+- **MR / EN translations for the 3 new ErrorCodes** — `SUBDIVISION_HAS_ACTIVE_DCS`, `SUBDIVISION_HAS_ACTIVE_STAFF`, `DC_HAS_ACTIVE_STAFF`. Same Phase-7 Marathi-parity guard tracked in Stage 5.
+- **OpenAPI spec-drift CI guard** (still tracked from Stage 3) — this stage proved it's needed: a previous stage's controller change shipped without re-snapshotting `docs/openapi.json`. The IT writes the file but doesn't fail on uncommitted drift. Phase 7 plan: add a `git diff --exit-code docs/openapi.json` step after the failsafe phase in CI.
+- **Snapshot sync to FE repo** — same manual `cp ../complaints/docs/openapi.json packages/api/openapi.json` then `pnpm api:gen` before Stage 7 (FE admin write screens).
+
+---
 
 ### Stage 7 · Frontend admin write screens + staff user management — ☐ not started
 

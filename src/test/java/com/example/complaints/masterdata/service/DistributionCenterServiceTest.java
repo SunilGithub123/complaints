@@ -2,6 +2,7 @@ package com.example.complaints.masterdata.service;
 
 import com.example.complaints.auth.model.UserRole;
 import com.example.complaints.auth.security.AuthenticatedStaff;
+import com.example.complaints.auth.service.StaffLookupService;
 import com.example.complaints.common.exception.BusinessException;
 import com.example.complaints.common.exception.ErrorCode;
 import com.example.complaints.masterdata.dto.DistributionCenterRequest;
@@ -24,6 +25,7 @@ class DistributionCenterServiceTest {
 
     private DistributionCenterRepository repo;
     private SubdivisionService subdivisions;
+    private StaffLookupService staffLookup;
     private DistributionCenterService service;
 
     private static final Long ADMIN_SUBDIV = 10L;
@@ -34,7 +36,8 @@ class DistributionCenterServiceTest {
     void setUp() {
         repo = mock(DistributionCenterRepository.class);
         subdivisions = mock(SubdivisionService.class);
-        service = new DistributionCenterService(repo, new DistributionCenterMapper(), subdivisions);
+        staffLookup = mock(StaffLookupService.class);
+        service = new DistributionCenterService(repo, new DistributionCenterMapper(), subdivisions, staffLookup);
         when(repo.save(any(DistributionCenter.class))).thenAnswer(inv -> {
             DistributionCenter dc = inv.getArgument(0);
             dc.setId(99L);
@@ -64,6 +67,21 @@ class DistributionCenterServiceTest {
                 new DistributionCenterRequest(99L /* not my subdivision */, "DC-X-001", "X", null)))
                 .isInstanceOf(BusinessException.class)
                 .extracting("errorCode").isEqualTo(ErrorCode.DC_NOT_IN_SCOPE);
+    }
+
+    @Test
+    @DisplayName("setActive(false): blocked when the DC still has active staff")
+    void deactivate_blockedByActiveStaff() {
+        DistributionCenter live = DistributionCenter.builder()
+                .id(55L).subdivisionId(ADMIN_SUBDIV).code("DC-NSK-007").active(true).build();
+        when(repo.findById(55L)).thenReturn(java.util.Optional.of(live));
+        when(staffLookup.hasActiveStaffInDistributionCenter(55L)).thenReturn(true);
+
+        assertThatThrownBy(() -> service.setActive(admin, 55L, false))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode").isEqualTo(ErrorCode.DC_HAS_ACTIVE_STAFF);
+
+        assertThat(live.isActive()).isTrue();
     }
 }
 

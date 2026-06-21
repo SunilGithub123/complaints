@@ -104,7 +104,7 @@ public class StaffAuthService {
     }
 
     @Transactional
-    public StaffSummaryResponse changePassword(Long userId, ChangePasswordRequest req) {
+    public LoginResponse changePassword(Long userId, ChangePasswordRequest req) {
         UserAccount user = users.findById(userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.UNAUTHORIZED));
 
@@ -120,9 +120,13 @@ public class StaffAuthService {
 
         user.setPasswordHash(passwordEncoder.encode(req.newPassword()));
         user.setPasswordResetRequired(false);
-        // Revoke all outstanding refresh tokens so other sessions must re-login.
+        // Revoke ALL outstanding refresh tokens — kicks every other live session AND invalidates
+        // the caller's current pair so the access JWT (which still carries
+        // passwordResetRequired = true in its claims) can't be reused. We then immediately mint
+        // a fresh pair so the caller never has to chain refresh; this is the convergence point
+        // documented in IMPLEMENTATION_LOG.md Stage 1 hotfix #1.
         refreshTokens.revokeAllForUser(user.getId());
-        return mapper.toSummary(user);
+        return issueTokenPair(user);
     }
 
     @Transactional

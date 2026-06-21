@@ -66,6 +66,9 @@ public class ComplaintCategoryService {
     @CacheEvict(value = CaffeineCacheConfig.CACHE_CATEGORIES, allEntries = true)
     public ComplaintCategoryResponse setActive(Long id, boolean active) {
         ComplaintCategory c = load(id);
+        // TODO(sunil, phase-3): once the `complaint` module lands, block deactivation
+        //   when open (non-terminal-status) complaints reference this category.
+        //   Until then, category deactivation is effectively staff-discipline-only.
         c.setActive(active);
         return mapper.toResponse(c);
     }

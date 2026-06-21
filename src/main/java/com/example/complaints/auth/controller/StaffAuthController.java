@@ -43,8 +43,12 @@ public class StaffAuthController {
     }
 
     @PostMapping("/auth/change-password")
-    @Operation(summary = "Change password (required on first login)")
-    public ResponseEntity<ApiResponse<StaffSummaryResponse>> changePassword(
+    @Operation(summary = "Change password and receive a fresh token pair",
+            description = "Persists the new password, revokes every refresh token belonging to the "
+                    + "caller (kicks all other sessions), and returns a brand-new access + refresh "
+                    + "pair with passwordResetRequired = false in both the JWT claims and the "
+                    + "response envelope. Callers do not need to chain /staff/auth/refresh afterwards.")
+    public ResponseEntity<ApiResponse<LoginResponse>> changePassword(
             @AuthenticationPrincipal AuthenticatedStaff me,
             @Valid @RequestBody ChangePasswordRequest req) {
         requireAuth(me);
