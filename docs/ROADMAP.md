@@ -320,6 +320,17 @@
 - After 30 days of stability, roll out to remaining subdivisions in waves.
 
 ### v2 backlog (out of scope for v1)
+- **SYSADMIN role above subdivision-scoped Admins.** v1 has one Admin per Subdivision, permanently bound to that subdivision (BRD §4.2 line 62, Hard Rule 8). Two real gaps surface from this in v1:
+  1. There is no role that can manage subdivisions themselves — yet `SubdivisionAdminController` currently lets any Admin create/edit/deactivate any Subdivision (the existing Stage 2 carry-over). v1 hardening (Phase 7) hides that surface from the Admin UI; v2 adds it back, gated by SYSADMIN.
+  2. Cross-subdivision oversight (group reports, reassignment across subdivisions, deactivating an Admin to onboard their successor without a DBA shell) has no path today.
+
+  **v2 shape:**
+  - New `UserRole.SYSADMIN`. No subdivision scope; `subdivision_id` nullable for SYSADMIN only.
+  - SYSADMIN can: CRUD all subdivisions, CRUD all Admins (cross-subdivision), read across all DCs and complaints. Cannot directly resolve complaints (operational work stays in the per-subdivision chain).
+  - Admin role unchanged from v1: scope = their own Subdivision, manages all DCs / Engineers / Technicians under it.
+  - DB: relax `chk_staff_scope` to permit `role=SYSADMIN AND subdivision_id IS NULL`; new partial unique `ux_one_active_sysadmin_global` (or drop the partial-unique entirely and allow many SYSADMINs — TBD with ops).
+  - Frontend: the existing FE Admin UX is unaffected; new screens (subdivision CRUD, cross-subdivision staff list, "act-as" view of an Admin's scope) ship behind a SYSADMIN role gate.
+  - Migration: existing bootstrap admin → SYSADMIN by default? Or seed a new `SYSADMIN001` and demote `ADMIN001` to a real subdivision-bound admin? Decide before v2 cutover.
 - Consumer complaint re-open (currently must raise new complaint)
 - Hierarchy levels above Subdivision (Division / Circle / Zone)
 - Auto-assignment of complaints by workload / availability
