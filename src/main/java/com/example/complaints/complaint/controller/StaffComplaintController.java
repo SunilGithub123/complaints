@@ -144,14 +144,16 @@ public class StaffComplaintController {
     }
 
     @PostMapping("/{id}/close")
-    @Operation(summary = "Engineer / Admin close-on-behalf of a RESOLVED complaint")
-    public ResponseEntity<ApiResponse<Void>> close(
+    @Operation(summary = "Engineer / Admin close-on-behalf of a RESOLVED complaint",
+            description = "Returns the post-close detail (status=CLOSED + bumped version) so the FE "
+                    + "can update its cache in one round-trip without a follow-up GET.")
+    public ResponseEntity<ApiResponse<ComplaintStaffDetailResponse>> close(
             @AuthenticationPrincipal AuthenticatedStaff caller,
             @PathVariable Long id,
             @Valid @RequestBody CloseComplaintRequest req
     ) {
         closure.close(caller, id, req);
-        return ResponseEntity.ok(ApiResponse.ok(null));
+        return ResponseEntity.ok(ApiResponse.ok(read.getById(caller, id)));
     }
 }
 

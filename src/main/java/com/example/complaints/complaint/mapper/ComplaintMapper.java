@@ -25,7 +25,13 @@ import java.util.List;
 @RequiredArgsConstructor
 public class ComplaintMapper {
 
-    private static final Duration IMAGE_URL_TTL = Duration.ofMinutes(15);
+    /**
+     * Signed-URL TTL for inline image rendering. Bumped from 15 min → 1 h in the Stage 16
+     * follow-up so the FE detail query can keep a normal {@code staleTime} instead of being
+     * forced to {@code staleTime: 0} just to refresh thumbnails. URLs are HMAC-signed; the TTL
+     * is a cache-friendliness knob, not a security primitive.
+     */
+    private static final Duration IMAGE_URL_TTL = Duration.ofHours(1);
 
     private final StorageService storage;
 
@@ -59,6 +65,7 @@ public class ComplaintMapper {
     public ComplaintImageResponse toImageResponse(ComplaintImage img) {
         return new ComplaintImageResponse(
                 img.getId(),
+                img.getImageType(),
                 img.getContentType(),
                 img.getSizeBytes(),
                 storage.signedReadUrl(img.getStorageKey(), IMAGE_URL_TTL),

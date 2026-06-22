@@ -107,15 +107,22 @@ class StaffComplaintControllerTest {
     }
 
     @Test
-    @DisplayName("POST close: delegates to closure service and returns success envelope")
+    @DisplayName("POST close: delegates to closure service and returns the post-close detail")
     void close_success() throws Exception {
         doNothing().when(closure).close(any(), eq(7L), any(CloseComplaintRequest.class));
+        ComplaintStaffDetailResponse closedDetail = new ComplaintStaffDetailResponse(
+                7L, "MH20260600000007", 99L, "+919999999999", 3L, ComplaintSeverity.HIGH,
+                "desc", "loc", 10L, 1L, 2L, null, ComplaintStatus.CLOSED, false,
+                null, null, null, null, null, null, null, null, null, 2L, java.util.List.of());
+        when(read.getById(any(), eq(7L))).thenReturn(closedDetail);
 
         mockMvc.perform(post("/api/v1/staff/complaints/7/close").with(engineer())
                         .contentType(APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(new CloseComplaintRequest(null))))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.success").value(true));
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.status").value("CLOSED"))
+                .andExpect(jsonPath("$.data.version").value(2));
 
         verify(closure).close(any(), eq(7L), any(CloseComplaintRequest.class));
     }

@@ -2085,6 +2085,71 @@ already in flight).
 
 ---
 
+### Stage 16.1 — FE Stage 12.2 micro-patches (Phase 4 polish)
+
+Small, surgical changes prompted by FE Stage 12.2 feedback. No new endpoints, no schema,
+no migrations — just contract sharpening so the FE can render a better gallery and avoid a
+follow-up GET after close.
+
+#### Scope delivered
+
+- **`ComplaintImageResponse.imageType`** — added `ComplaintImageType` discriminator (enum
+  `COMPLAINT | RESOLUTION`) between `id` and `contentType`. Mapper now propagates
+  `img.getImageType()`. Unlocks grouped sections / badges on the FE gallery.
+- **Signed-URL TTL: 15 min → 1 hour** in `ComplaintMapper.IMAGE_URL_TTL`. Lets the FE detail
+  query keep a normal `staleTime` instead of `staleTime: 0` just to refresh thumbnails. URLs
+  are HMAC-signed; TTL is a cache-friendliness knob, not a security primitive.
+- **`POST /api/v1/staff/complaints/{id}/close`** now returns `ComplaintStaffDetailResponse`
+  (status=`CLOSED`, bumped `version`, refreshed timestamps) instead of `Void`. Saves the FE
+  one round-trip on close. Controller composes `closure.close(...)` + `read.getById(...)` —
+  the second call also re-runs the scope check, which is fine (cheap, idempotent).
+- **`GET /api/v1/staff/users` default sort** — pinned `@PageableDefault(sort="fullName",
+  direction=ASC, size=20)` on the search handler. Picker dropdowns are alphabetical by default
+  without the FE having to remember `?sort=fullName,asc`.
+
+#### Asks explicitly closed as "no change needed"
+
+- **`SLA_BREACH_REASON_REQUIRED` only fires when no existing reason** — re-verified
+  `ComplaintClosureService:48-53`: the throw is gated on
+  `breached && !reasonAlreadyOnFile && (request.reason == null || blank)`. A reason captured
+  at resolve time is silently reused; the closer is never nagged. No change.
+- **Deprecate `INVALID_TECHNICIAN`** — code does not exist in `ErrorCode.java`. The
+  technician failure codes today are `TECHNICIAN_NOT_FOUND` (404, account missing/disabled)
+  and `TECHNICIAN_NOT_IN_DC` (409, account exists but wrong DC). FE matcher can drop the
+  `INVALID_TECHNICIAN` branch — it's pure FE legacy from an earlier spec draft.
+
+#### Incidents fixed during implementation
+
+- **None of note**. The `StaffComplaintController.close` test had to be updated to stub
+  `read.getById(...)` (previously it was a no-op `Void` endpoint), and now asserts on
+  `data.status == "CLOSED"` and `data.version == 2`. One-test edit.
+
+#### Tests added
+
+- **0 new tests** — existing `StaffComplaintControllerTest.close_success` updated in-place to
+  cover the new response shape. `ComplaintImageResponse` constructor signature change is
+  exercised transitively by mapper-using tests; no test was asserting on positional fields.
+
+#### Build status
+
+- `./mvnw verify` green.
+- **126 unit + 8 IT**, OpenAPI **48 paths** (unchanged path count; response schema on
+  `/staff/complaints/{id}/close` now points at `ApiResponseComplaintStaffDetailResponse`, and
+  the `ComplaintImageResponse` schema gains an `imageType` enum property).
+
+#### Carry-overs / known follow-ups
+
+- **Image lightbox / fullscreen view** — FE-only (gallery zoom). Not BE work.
+- **`If-Match` plumbing for optimistic concurrency** — still deferred until FE explicitly
+  needs it (two engineers acting on the same complaint at the same time). Same story as
+  before: `@Version` already raises `COMPLAINT_VERSION_CONFLICT` (409); FE just isn't
+  sending the read version back yet.
+- **Split images endpoint** (`GET /complaints/:id/images`) — not built. The TTL bump fully
+  addresses the original complaint; a dedicated endpoint can come if/when image churn on a
+  hot complaint becomes a measurable problem.
+
+---
+
 ## How to update this log
 
 1. At the end of a stage, append (or fill in) the corresponding subsection.

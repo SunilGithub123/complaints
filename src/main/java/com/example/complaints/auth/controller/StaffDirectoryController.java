@@ -11,6 +11,8 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.constraints.Size;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.web.PageableDefault;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.validation.annotation.Validated;
@@ -75,7 +77,9 @@ public class StaffDirectoryController {
             @RequestParam(required = false) UserRole role,
             @RequestParam(required = false) Long distributionCenterId,
             @RequestParam(required = false) Boolean active,
-            Pageable pageable
+            // Default sort fullName,asc so picker dropdowns are alphabetical without the FE
+            // having to remember to pass ?sort=fullName,asc on every call.
+            @PageableDefault(size = 20, sort = "fullName", direction = Sort.Direction.ASC) Pageable pageable
     ) {
         return ResponseEntity.ok(ApiResponse.ok(
                 lookup.searchDirectory(caller, role, distributionCenterId, active, pageable)));
