@@ -56,5 +56,19 @@ class ComplaintCategoryServiceTest {
                 .isInstanceOf(BusinessException.class)
                 .extracting("errorCode").isEqualTo(ErrorCode.CATEGORY_CODE_TAKEN);
     }
+
+    @Test
+    @DisplayName("listActive: delegates to findByActiveTrue and maps each row")
+    void listActive_filtersActiveOnly() {
+        ComplaintCategory active = ComplaintCategory.builder()
+                .id(1L).code("POWER_OUTAGE").name("Power Outage").slaHours(8).active(true).build();
+        when(repo.findByActiveTrue(org.springframework.data.domain.PageRequest.of(0, 20)))
+                .thenReturn(new org.springframework.data.domain.PageImpl<>(java.util.List.of(active)));
+
+        var page = service.listActive(org.springframework.data.domain.PageRequest.of(0, 20));
+
+        assertThat(page.content()).hasSize(1);
+        assertThat(page.content().get(0).code()).isEqualTo("POWER_OUTAGE");
+    }
 }
 

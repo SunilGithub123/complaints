@@ -1009,6 +1009,43 @@ docs/openapi.json — 32 paths (was 30); +2: POST /api/v1/consumer/complaints, G
 
 ---
 
+#### Stage 10b · Post-stage hotfix — consumer-side category list — ✅ 2026-06-22
+
+> Caught during the Stage 11 FE handoff prep: the original Stage 10b plan implicitly assumed
+> the FE would call `GET /api/v1/staff/masterdata/categories` for its submit-form dropdown.
+> `SecurityConfig` actually gates that path behind {@code .authenticated()} — i.e. a staff JWT.
+> Consumers have no staff JWT (hard-rule #6), so the FE would have hit `401 UNAUTHORIZED` on
+> the first category-dropdown render.
+
+##### Scope delivered
+
+- `ComplaintCategoryRepository.findByActiveTrue(Pageable)` — new derived finder.
+- `ComplaintCategoryService.listActive(Pageable)` — `@Transactional(readOnly = true)` page over active rows only. Staff `list(Pageable)` still returns the full set so admins can audit inactive rows.
+- `masterdata.controller.ConsumerMasterdataReadController` — new controller, `GET /api/v1/consumer/masterdata/categories`. Lives in the `masterdata` module (its controllers may only call its own services — hard-rule), but the URL prefix puts it under `/consumer/**` so `ConsumerVerificationFilter` is the actual gate. No `SecurityConfig` change needed: `/api/v1/consumer/**` is already `permitAll` at the chain level + filter-gated.
+- 1 unit test in `ComplaintCategoryServiceTest` (delegates to `findByActiveTrue` + maps each row).
+- 1 WebMvcTest `ConsumerMasterdataReadControllerTest` (200 happy path, active flag surfaced).
+
+##### Build status
+
+```
+[INFO] Tests run: 62, Failures: 0, Errors: 0, Skipped: 0  (Surefire — unit; +2 from Stage 10b: 1 service + 1 controller)
+[INFO] Tests run:  6, Failures: 0, Errors: 0, Skipped: 0  (Failsafe — IT;   unchanged)
+[INFO] BUILD SUCCESS
+docs/openapi.json — 33 paths (was 32); +1: GET /api/v1/consumer/masterdata/categories.
+```
+
+##### Why this is a hotfix, not Stage 11 work
+
+- Strictly backend. FE agent should never touch BE security wiring.
+- Found by reviewing the FE handoff prompt against `SecurityConfig` — a class of bug that would otherwise have wasted half a Stage-11 day on phantom 401s.
+- Future-proofing for Stage 11: the FE prompt now correctly points at `/api/v1/consumer/masterdata/categories` (consumer JWT, active-only).
+
+##### Carry-overs
+
+- **Other masterdata** (subdivisions, distribution centers) is **not** exposed under `/consumer/**` — the consumer never picks a DC or subdivision; both are derived server-side from `consumer_master` at submission. Keep it that way unless a Phase 5 / 6 screen explicitly needs it.
+
+---
+
 ## How to update this log
 
 1. At the end of a stage, append (or fill in) the corresponding subsection.

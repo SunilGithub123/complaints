@@ -28,6 +28,16 @@ public class ComplaintCategoryService {
         return PageResponse.from(repo.findAll(pageable).map(mapper::toResponse));
     }
 
+    /**
+     * Active-only page used by the consumer-facing dropdown
+     * ({@code GET /api/v1/consumer/masterdata/categories}). Staff reads keep using {@link #list}
+     * so admins can see inactive rows.
+     */
+    @Transactional(readOnly = true)
+    public PageResponse<ComplaintCategoryResponse> listActive(Pageable pageable) {
+        return PageResponse.from(repo.findByActiveTrue(pageable).map(mapper::toResponse));
+    }
+
     @Transactional(readOnly = true)
     @Cacheable(value = CaffeineCacheConfig.CACHE_CATEGORIES, key = "#id")
     public ComplaintCategoryResponse get(Long id) {
