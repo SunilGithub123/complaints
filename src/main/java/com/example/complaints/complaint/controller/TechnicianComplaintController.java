@@ -2,16 +2,22 @@ package com.example.complaints.complaint.controller;
 
 import com.example.complaints.auth.security.AuthenticatedStaff;
 import com.example.complaints.common.dto.ApiResponse;
+import com.example.complaints.common.dto.PageResponse;
 import com.example.complaints.complaint.dto.ComplaintImageResponse;
+import com.example.complaints.complaint.dto.ComplaintListItemResponse;
+import com.example.complaints.complaint.dto.ComplaintSearchRequest;
 import com.example.complaints.complaint.dto.ResolveComplaintRequest;
 import com.example.complaints.complaint.service.ComplaintResolutionService;
+import com.example.complaints.complaint.service.ComplaintSearchService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -36,6 +42,19 @@ import java.util.List;
 public class TechnicianComplaintController {
 
     private final ComplaintResolutionService resolution;
+    private final ComplaintSearchService search;
+
+    @GetMapping
+    @Operation(summary = "Paged list of complaints assigned to the calling technician",
+            description = "Server pins assigned_technician_id = caller.userId(). "
+                    + "Optional filters: status, severity, slaBreached, dateFrom/dateTo, q.")
+    public ResponseEntity<ApiResponse<PageResponse<ComplaintListItemResponse>>> list(
+            @AuthenticationPrincipal AuthenticatedStaff caller,
+            ComplaintSearchRequest filters,
+            Pageable pageable
+    ) {
+        return ResponseEntity.ok(ApiResponse.ok(search.listForTechnician(caller, filters, pageable)));
+    }
 
     @PostMapping("/{id}/start")
     @Operation(summary = "Start work on an ASSIGNED complaint (→ IN_PROGRESS)")

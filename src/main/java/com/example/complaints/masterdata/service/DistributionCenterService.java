@@ -127,5 +127,15 @@ public class DistributionCenterService {
     public Long getSubdivisionId(Long distributionCenterId) {
         return load(distributionCenterId).getSubdivisionId();
     }
+
+    /**
+     * Cross-module helper used by {@code ComplaintSearchService} (Stage 16) to bound an admin's
+     * complaint list to their subdivision. Empty result is harmless — the caller will compose
+     * an "IN ()" predicate that returns no rows.
+     */
+    @Transactional(readOnly = true)
+    public java.util.List<Long> findDcIdsInSubdivision(Long subdivisionId) {
+        return repo.findIdsBySubdivisionId(subdivisionId);
+    }
 }
 

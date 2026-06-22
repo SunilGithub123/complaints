@@ -5,14 +5,17 @@ import com.example.complaints.auth.security.AuthenticatedStaff;
 import com.example.complaints.auth.security.JwtFactory;
 import com.example.complaints.complaint.dto.AssignComplaintRequest;
 import com.example.complaints.complaint.dto.CloseComplaintRequest;
+import com.example.complaints.complaint.dto.ComplaintListItemResponse;
 import com.example.complaints.complaint.dto.ComplaintStaffDetailResponse;
 import com.example.complaints.complaint.dto.RejectComplaintRequest;
 import com.example.complaints.complaint.model.ComplaintSeverity;
 import com.example.complaints.complaint.model.ComplaintStatus;
 import com.example.complaints.complaint.service.ComplaintAssignmentService;
 import com.example.complaints.complaint.service.ComplaintClosureService;
+import com.example.complaints.complaint.service.ComplaintSearchService;
 import com.example.complaints.complaint.service.ComplaintStaffReadService;
 import com.example.complaints.complaint.service.ComplaintTriageService;
+import com.example.complaints.common.dto.PageResponse;
 import com.example.complaints.common.exception.GlobalExceptionHandler;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -54,6 +57,7 @@ class StaffComplaintControllerTest {
     @MockitoBean ComplaintTriageService triage;
     @MockitoBean ComplaintStaffReadService read;
     @MockitoBean ComplaintClosureService closure;
+    @MockitoBean ComplaintSearchService search;
     @MockitoBean JwtFactory jwtFactory;
 
     private RequestPostProcessor engineer() {
@@ -114,6 +118,24 @@ class StaffComplaintControllerTest {
                 .andExpect(jsonPath("$.success").value(true));
 
         verify(closure).close(any(), eq(7L), any(CloseComplaintRequest.class));
+    }
+
+    @Test
+    @DisplayName("GET /staff/complaints?status=ASSIGNED: returns PageResponse envelope")
+    void list_success() throws Exception {
+        PageResponse<ComplaintListItemResponse> page = new PageResponse<>(
+                java.util.List.of(new ComplaintListItemResponse(
+                        7L, "MH20260600000007", 3L, ComplaintSeverity.HIGH,
+                        ComplaintStatus.ASSIGNED, false, 10L, 1L, 2L, "+919999999999",
+                        null, null, null, null)),
+                0, 20, 1, 1, java.util.List.of("createdAt,desc"));
+        when(search.listForStaff(any(), any(), any())).thenReturn(page);
+
+        mockMvc.perform(get("/api/v1/staff/complaints?status=ASSIGNED").with(engineer()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.content.length()").value(1))
+                .andExpect(jsonPath("$.data.content[0].ticketNo").value("MH20260600000007"))
+                .andExpect(jsonPath("$.data.totalElements").value(1));
     }
 }
 

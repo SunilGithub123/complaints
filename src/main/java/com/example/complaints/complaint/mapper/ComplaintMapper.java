@@ -4,6 +4,7 @@ import com.example.complaints.common.util.DateUtils;
 import com.example.complaints.complaint.dto.ComplaintDetailResponse;
 import com.example.complaints.complaint.dto.ComplaintHistoryEntryResponse;
 import com.example.complaints.complaint.dto.ComplaintImageResponse;
+import com.example.complaints.complaint.dto.ComplaintListItemResponse;
 import com.example.complaints.complaint.dto.ComplaintStaffDetailResponse;
 import com.example.complaints.complaint.dto.SubmitComplaintResponse;
 import com.example.complaints.complaint.model.Complaint;
@@ -103,6 +104,25 @@ public class ComplaintMapper {
                 h.getChangedByUserId(),
                 h.getNote(),
                 DateUtils.toIst(h.getChangedAt())
+        );
+    }
+
+    public ComplaintListItemResponse toListItem(Complaint c) {
+        return new ComplaintListItemResponse(
+                c.getId(),
+                c.getTicketNo(),
+                c.getCategoryId(),
+                c.getSeverity(),
+                c.getStatus(),
+                c.isSlaBreached(),
+                c.getDistributionCenterId(),
+                c.getAssignedEngineerId(),
+                c.getAssignedTechnicianId(),
+                c.getContactMobile(),
+                DateUtils.toIst(c.getCreatedAt()),
+                DateUtils.toIst(c.getSlaDeadline()),
+                DateUtils.toIst(c.getResolvedAt()),
+                DateUtils.toIst(c.getClosedAt())
         );
     }
 }

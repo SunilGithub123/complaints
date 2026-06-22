@@ -1941,6 +1941,150 @@ shipped lifecycle, not a missing feature.
 
 ---
 
+### Stage 16 — Phase 4 Stage 5 · Paged complaint search (Specifications)
+
+**Refs:** TECHNICAL_DESIGN.md §5.4–§5.5 · ROADMAP.md Phase 4 last bullet · FE Stage 12 lookup-stub carry-over.
+
+#### What shipped
+
+Two paged list endpoints — the last bullet on ROADMAP Phase 4:
+
+| Endpoint | Caller | Default scope |
+|---|---|---|
+| `GET /api/v1/staff/complaints` | ENGINEER / ADMIN | Engineer → own DC; Admin → own subdivision (IN over its DCs) |
+| `GET /api/v1/technician/complaints` | TECHNICIAN | `assigned_technician_id = caller.userId()` |
+
+Filter params (all optional, bound to `ComplaintSearchRequest`):
+`status`, `severity`, `categoryId`, `distributionCenterId` (admin only), `assignedTechnicianId`
+(staff only), `slaBreached`, `dateFrom`, `dateTo`, `q` (case-insensitive substring on
+`ticket_no` + `description`). Standard `?page=&size=&sort=` honoured; default
+`createdAt,desc` from `PageResponse.defaultSort()`. Hard size cap from the global
+`WebConfig.maxPageSize` setting.
+
+New shapes:
+
+- `ComplaintListItemResponse` — lighter than the detail DTO (no `description`, no reasons,
+  no images, no history). FE batch-resolves engineer / technician names via
+  `GET /api/v1/staff/users?ids=…` (Stage 14.5).
+- `ComplaintSearchRequest` — record bound from query params.
+
+New module-private toolkit:
+
+- `ComplaintSpecifications` — static factory methods, each returning a `Specification<Complaint>`
+  or {@code null} when the filter is absent. Eight predicates: `status`, `severity`, `category`,
+  `dc` (eq + in), `technician`, `slaBreached`, `createdFrom/To`, free-text. Kept package-private
+  in the service package to avoid leaking JPA criteria types into the public surface.
+- `ComplaintSearchService` — composes scope + filters, calls
+  `JpaSpecificationExecutor.findAll(spec, pageable)`, maps to list-item DTOs.
+
+`ComplaintRepository` extended with `JpaSpecificationExecutor<Complaint>`. No other repo
+changes (the derived-name queries from earlier stages keep working). New
+`DistributionCenterRepository.findIdsBySubdivisionId(Long)` + service helper for admin scope.
+
+#### Scope rules (server-enforced, before any user-supplied filter)
+
+- **Engineer staff list** — caller's DC pinned. `distributionCenterId` query param other than
+  caller's DC → `403 FORBIDDEN` (same policy as Stage 14.6 directory search — don't silently
+  rewrite, let the FE know the request was overruled).
+- **Admin staff list** — caller's subdivision pinned via `dc IN (…)`. Optional
+  `distributionCenterId` further narrows, but only to a DC within the admin's subdivision;
+  outside → `403 FORBIDDEN`. Without the param, all DCs in the subdivision are matched.
+- **Technician list** — `assigned_technician_id = caller.userId()` pinned. The
+  `assignedTechnicianId` request param is silently ignored — a technician can't pivot to
+  someone else's queue. Filters `categoryId` and `distributionCenterId` are also silently
+  dropped (not 403'd — these aren't sensitive, just irrelevant in this surface).
+
+Wrong-role callers (e.g. TECHNICIAN hitting `/staff/complaints` or ENGINEER hitting
+`/technician/complaints`) are blocked by the existing SecurityConfig path matchers; the
+service layer adds a defence-in-depth `FORBIDDEN` for `/technician/complaints` on the off
+chance a future config change weakens the gate.
+
+#### Incidents / decisions
+
+1. **`Specification.allOf(null, …)` NPEs in Spring Data 4.** First service pass used
+   `Specification.allOf(...)` with `null` arms to let the predicate factories return `null`
+   for absent filters. That blew up at runtime with
+   `IllegalArgumentException: Other specification must not be null` — `allOf` does not tolerate
+   nulls. Switched to a small `combine(...)` helper that filters `null`s via stream + reduce,
+   falling back to `cb.conjunction()` (match-all) when every arm is absent.
+2. **`Specification.where(null)` ambiguous overload.** Second attempt used
+   `Specification.where(null)` as the reduce identity — Spring Data 4 overloaded `where` with
+   `PredicateSpecification`, making the `null` arg ambiguous. Replaced with a
+   `reduce(Specification::and).orElseGet(matchAll)` pattern. No `where(null)` anywhere.
+3. **Free-text uses `LIKE` not `tsvector`.** For v1 the search box hits `ticket_no` +
+   `description` with a case-insensitive substring. The `description` column is short and the
+   table is moderate; a GIN-indexed `tsvector` is the upgrade path if we outgrow it, not a
+   different framework. Documented inline in `ComplaintSpecifications.textSearch`.
+4. **`ComplaintSpecifications` kept package-private**, not exposed via `ComplaintQueryService`
+   or similar. Other modules have no business composing complaint criteria; the search service
+   is the seam.
+
+#### Tests
+
+- `ComplaintSearchServiceTest` — 6 tests:
+  - Engineer happy: filtered search returns `PageResponse`.
+  - Engineer requesting another DC → `403 FORBIDDEN` (no query issued).
+  - Admin without DC param composes `IN (…)` over subdivision DCs.
+  - Admin with out-of-subdivision DC → `403 FORBIDDEN`.
+  - Technician happy: scope pinned to own `userId`; cross-tech filter from request silently
+    ignored.
+  - Wrong-role caller on `listForTechnician` → `403 FORBIDDEN`.
+- `StaffComplaintControllerTest` — +1: `GET /staff/complaints?status=ASSIGNED` returns
+  `PageResponse` envelope.
+- `TechnicianComplaintControllerTest` — +1: `GET /technician/complaints` returns
+  `PageResponse` envelope.
+
+No new IT — the underlying `JpaSpecificationExecutor.findAll` is Spring Data infrastructure,
+exercised in countless production codebases; our composition logic is fully covered by the
+service unit tests against a mocked repo. The full-lifecycle IT from Stage 14 still covers
+the row shapes the list returns.
+
+#### Build status
+
+```
+[INFO] Tests run: 126, Failures: 0, Errors: 0, Skipped: 0  (Surefire — unit; +8 from Stage 15: 6+1+1)
+[INFO] Tests run:   8, Failures: 0, Errors: 0, Skipped: 0  (Failsafe — IT;   unchanged)
+[INFO] BUILD SUCCESS
+docs/openapi.json — 46 → 48 paths (+2 paged list endpoints).
+```
+
+#### Phase 4 status — **complete**
+
+All ROADMAP §"Phase 4 Backend" bullets shipped:
+
+- ✅ `ComplaintStatusTransition` — Stage 12
+- ✅ `ComplaintAssignmentService` — Stage 13
+- ✅ `ComplaintTriageService` — Stage 13
+- ✅ `ComplaintResolutionService` — Stage 14
+- ✅ `ComplaintClosureService` — Stage 14
+- ✅ SLA breach reason required-when-breached — Stage 14
+- ✅ `SlaMonitorService` — Stage 15
+- ✅ Resolution image upload — Stage 14
+- ✅ Specification-based search — **Stage 16**
+
+Done-criteria met end-to-end (covered by `ComplaintFullLifecycleIT`), staff + technician
+both have a usable list view. The remaining Phase 4 work is FE: technician mobile flow,
+complaints list page (now unblocked), close-modal + image gallery (FE Stage 12.2 prompt
+already in flight).
+
+#### Carry-overs / known follow-ups
+
+- **`q` parameter performance ceiling** — if list-page latency creeps up under real volume,
+  add a GIN-indexed `tsvector` over `(ticket_no, description)` and switch `textSearch` to
+  `@@ websearch_to_tsquery(...)`. Defer until profiling says so.
+- **Sort whitelist** — `Pageable` accepts arbitrary `sort=fieldName,asc/desc`. Today an FE
+  bug could send `sort=passwordHash,desc` (no such Complaint field — would throw a
+  `PropertyReferenceException` and surface as 400). If we want a friendlier error or a
+  hard whitelist, add a `@SortDefault` + a `PageableHandlerMethodArgumentResolverCustomizer`.
+  Not blocking, FE-driven only.
+- **Multi-subdivision admin / "all DCs in MSEB" view** — explicitly out of scope per BRD
+  §"Future considerations". The admin branch composes `dc IN (…)` so it scales naturally
+  when that view is wanted — just swap the `findDcIdsInSubdivision` call for a wider source.
+- **Stage 17+ / Phase 5** — consumer tracking, cancellation, feedback (per ROADMAP). Independent
+  of Stage 16; safe to start whenever FE has bandwidth on the lifecycle screens.
+
+---
+
 ## How to update this log
 
 1. At the end of a stage, append (or fill in) the corresponding subsection.
