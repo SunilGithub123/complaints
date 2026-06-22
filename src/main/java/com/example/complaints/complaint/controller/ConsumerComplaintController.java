@@ -167,6 +167,20 @@ public class ConsumerComplaintController {
                 .body(ApiResponse.ok(feedback.submit(caller, ticketNo, req)));
     }
 
+    @GetMapping("/{ticketNo}/feedback")
+    @Operation(
+            summary = "Read-back the verified consumer's own feedback for a complaint (Stage 20.1)",
+            description = "Returns 200 with data=null when no feedback has been submitted yet. "
+                    + "Lets the FE render a read-only rating panel without try / catching the "
+                    + "submit 409 to discover existence. Owner-checked; foreign ticket → 403."
+    )
+    public ResponseEntity<ApiResponse<FeedbackResponse>> getFeedback(
+            @AuthenticationPrincipal VerifiedConsumer caller,
+            @PathVariable String ticketNo
+    ) {
+        return ResponseEntity.ok(ApiResponse.ok(feedback.getOwned(caller, ticketNo)));
+    }
+
     /**
      * Documentation-only multipart shape. springdoc otherwise can't express the form-part layout
      * for OpenAPI consumers (the codegen relies on this to render the form schema).

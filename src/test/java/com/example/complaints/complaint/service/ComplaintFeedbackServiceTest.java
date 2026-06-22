@@ -114,5 +114,42 @@ class ComplaintFeedbackServiceTest {
                 .isInstanceOfSatisfying(BusinessException.class, e ->
                         assertThat(e.errorCode()).isEqualTo(ErrorCode.COMPLAINT_NOT_OWNED_BY_CONSUMER));
     }
+
+    @Test
+    @DisplayName("getOwned: existing row → mapped FeedbackResponse")
+    void getOwned_existing_returnsMapped() {
+        Complaint c = Complaint.builder().id(7L).ticketNo("MH20260600000007")
+                .consumerMasterId(99L).status(ComplaintStatus.CLOSED).build();
+        Feedback row = Feedback.builder().id(101L).complaintId(7L).rating(4).build();
+        when(complaints.findByTicketNo("MH20260600000007")).thenReturn(Optional.of(c));
+        when(feedback.findByComplaintId(7L)).thenReturn(Optional.of(row));
+        FeedbackResponse stub = new FeedbackResponse(101L, 4, null, null);
+        when(mapper.toFeedbackResponse(row)).thenReturn(stub);
+
+        assertThat(service.getOwned(caller, "MH20260600000007")).isSameAs(stub);
+    }
+
+    @Test
+    @DisplayName("getOwned: no row yet → null (not an error)")
+    void getOwned_missing_returnsNull() {
+        Complaint c = Complaint.builder().id(7L).ticketNo("MH20260600000007")
+                .consumerMasterId(99L).status(ComplaintStatus.CLOSED).build();
+        when(complaints.findByTicketNo("MH20260600000007")).thenReturn(Optional.of(c));
+        when(feedback.findByComplaintId(7L)).thenReturn(Optional.empty());
+
+        assertThat(service.getOwned(caller, "MH20260600000007")).isNull();
+    }
+
+    @Test
+    @DisplayName("getOwned: foreign ticket → 403 COMPLAINT_NOT_OWNED_BY_CONSUMER")
+    void getOwned_foreignTicket_rejected() {
+        Complaint c = Complaint.builder().id(7L).ticketNo("MH20260600000007")
+                .consumerMasterId(42L).status(ComplaintStatus.CLOSED).build();
+        when(complaints.findByTicketNo("MH20260600000007")).thenReturn(Optional.of(c));
+
+        assertThatThrownBy(() -> service.getOwned(caller, "MH20260600000007"))
+                .isInstanceOfSatisfying(BusinessException.class, e ->
+                        assertThat(e.errorCode()).isEqualTo(ErrorCode.COMPLAINT_NOT_OWNED_BY_CONSUMER));
+    }
 }
 

@@ -79,5 +79,24 @@ public class ComplaintFeedbackService {
     private static String nullIfBlank(String s) {
         return (s == null || s.isBlank()) ? null : s;
     }
+
+    /**
+     * Read-back of the consumer's own feedback (Stage 20.1). Returns {@code null} when no
+     * feedback row exists yet — same owner / state semantics as {@link #submit}, but the
+     * "not yet submitted" case is a normal {@code 200} with a {@code null} payload rather
+     * than an error code. That keeps the FE detail screen simple: render the rating panel
+     * iff the response body is non-null, no try / catch needed.
+     */
+    @Transactional(readOnly = true)
+    public FeedbackResponse getOwned(VerifiedConsumer caller, String ticketNo) {
+        Complaint c = complaints.findByTicketNo(ticketNo)
+                .orElseThrow(() -> new BusinessException(ErrorCode.COMPLAINT_NOT_FOUND));
+        if (!c.getConsumerMasterId().equals(caller.consumerMasterId())) {
+            throw new BusinessException(ErrorCode.COMPLAINT_NOT_OWNED_BY_CONSUMER);
+        }
+        return feedback.findByComplaintId(c.getId())
+                .map(mapper::toFeedbackResponse)
+                .orElse(null);
+    }
 }
 

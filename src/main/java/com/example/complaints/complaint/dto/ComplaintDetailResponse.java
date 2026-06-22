@@ -2,6 +2,7 @@ package com.example.complaints.complaint.dto;
 
 import com.example.complaints.complaint.model.ComplaintSeverity;
 import com.example.complaints.complaint.model.ComplaintStatus;
+import io.swagger.v3.oas.annotations.media.Schema;
 
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -32,6 +33,10 @@ public record ComplaintDetailResponse(
         OffsetDateTime slaDeadline,
         OffsetDateTime resolvedAt,
         OffsetDateTime closedAt,
+        @Schema(requiredMode = Schema.RequiredMode.REQUIRED,
+                description = "True iff the consumer has already submitted feedback for this complaint. "
+                        + "Lets the FE hide the Rate button on first paint without a probe POST.")
+        boolean feedbackSubmitted,
         List<ComplaintImageResponse> images
 ) {
 }

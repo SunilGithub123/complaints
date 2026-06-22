@@ -50,7 +50,9 @@ public class ComplaintMapper {
         );
     }
 
-    public ComplaintDetailResponse toDetailResponse(Complaint c, String consumerId, List<ComplaintImage> images) {
+    public ComplaintDetailResponse toDetailResponse(Complaint c, String consumerId,
+                                                    List<ComplaintImage> images,
+                                                    boolean feedbackSubmitted) {
         return new ComplaintDetailResponse(
                 c.getId(),
                 c.getTicketNo(),
@@ -66,6 +68,7 @@ public class ComplaintMapper {
                 DateUtils.toIst(c.getSlaDeadline()),
                 DateUtils.toIst(c.getResolvedAt()),
                 DateUtils.toIst(c.getClosedAt()),
+                feedbackSubmitted,
                 images.stream().map(this::toImageResponse).toList()
         );
     }

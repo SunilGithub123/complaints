@@ -132,7 +132,7 @@ class ConsumerComplaintControllerTest {
                         3L, null, "Power outage", "Plot 17",
                         ComplaintStatus.SUBMITTED, false,
                         OffsetDateTime.now(), OffsetDateTime.now().plusHours(24),
-                        null, null, List.of()));
+                        null, null, false, List.of()));
 
         mockMvc.perform(get("/api/v1/consumer/complaints/{t}", "MH20260600000123"))
                 .andExpect(status().isOk())
@@ -232,6 +232,30 @@ class ConsumerComplaintControllerTest {
                         .content("{\"rating\":6}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error.code").value("VALIDATION_FAILED"));
+    }
+
+    @Test
+    @DisplayName("GET /complaints/{ticketNo}/feedback — existing row returns 200 with payload")
+    void getFeedback_existing_200() throws Exception {
+        when(feedback.getOwned(any(), eq("MH20260600000007")))
+                .thenReturn(new FeedbackResponse(101L, 4, "Quick fix", OffsetDateTime.now()));
+
+        mockMvc.perform(get("/api/v1/consumer/complaints/{t}/feedback", "MH20260600000007"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.id").value(101))
+                .andExpect(jsonPath("$.data.rating").value(4));
+    }
+
+    @Test
+    @DisplayName("GET /complaints/{ticketNo}/feedback — no row yet returns 200 with data=null")
+    void getFeedback_missing_200_null() throws Exception {
+        when(feedback.getOwned(any(), eq("MH20260600000007"))).thenReturn(null);
+
+        mockMvc.perform(get("/api/v1/consumer/complaints/{t}/feedback", "MH20260600000007"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data").doesNotExist());
     }
 }
 

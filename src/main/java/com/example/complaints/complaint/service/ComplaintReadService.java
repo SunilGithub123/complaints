@@ -14,6 +14,7 @@ import com.example.complaints.complaint.model.ComplaintStatus;
 import com.example.complaints.complaint.repository.ComplaintHistoryRepository;
 import com.example.complaints.complaint.repository.ComplaintImageRepository;
 import com.example.complaints.complaint.repository.ComplaintRepository;
+import com.example.complaints.complaint.repository.FeedbackRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
@@ -49,13 +50,15 @@ public class ComplaintReadService {
     private final ComplaintRepository complaintRepo;
     private final ComplaintImageRepository imageRepo;
     private final ComplaintHistoryRepository historyRepo;
+    private final FeedbackRepository feedbackRepo;
     private final ComplaintMapper mapper;
 
     @Transactional(readOnly = true)
     public ComplaintDetailResponse getOwnedByTicketNo(VerifiedConsumer caller, String ticketNo) {
         Complaint c = requireOwnedByTicketNo(caller, ticketNo);
         List<ComplaintImage> images = imageRepo.findByComplaintIdOrderByIdAsc(c.getId());
-        return mapper.toDetailResponse(c, caller.consumerId(), images);
+        boolean feedbackSubmitted = feedbackRepo.existsByComplaintId(c.getId());
+        return mapper.toDetailResponse(c, caller.consumerId(), images, feedbackSubmitted);
     }
 
     /**

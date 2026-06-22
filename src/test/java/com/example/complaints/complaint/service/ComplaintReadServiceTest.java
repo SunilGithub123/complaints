@@ -14,6 +14,7 @@ import com.example.complaints.complaint.model.ComplaintStatus;
 import com.example.complaints.complaint.repository.ComplaintHistoryRepository;
 import com.example.complaints.complaint.repository.ComplaintImageRepository;
 import com.example.complaints.complaint.repository.ComplaintRepository;
+import com.example.complaints.complaint.repository.FeedbackRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -37,6 +38,7 @@ class ComplaintReadServiceTest {
     private ComplaintRepository complaintRepo;
     private ComplaintImageRepository imageRepo;
     private ComplaintHistoryRepository historyRepo;
+    private FeedbackRepository feedbackRepo;
     private ComplaintMapper mapper;
     private ComplaintReadService service;
 
@@ -48,8 +50,9 @@ class ComplaintReadServiceTest {
         complaintRepo = mock(ComplaintRepository.class);
         imageRepo = mock(ComplaintImageRepository.class);
         historyRepo = mock(ComplaintHistoryRepository.class);
+        feedbackRepo = mock(FeedbackRepository.class);
         mapper = mock(ComplaintMapper.class);
-        service = new ComplaintReadService(complaintRepo, imageRepo, historyRepo, mapper);
+        service = new ComplaintReadService(complaintRepo, imageRepo, historyRepo, feedbackRepo, mapper);
     }
 
     @Test
@@ -59,11 +62,12 @@ class ComplaintReadServiceTest {
                 .consumerMasterId(99L).status(ComplaintStatus.SUBMITTED).build();
         when(complaintRepo.findByTicketNo("MH20260600000123")).thenReturn(Optional.of(c));
         when(imageRepo.findByComplaintIdOrderByIdAsc(1L)).thenReturn(List.of());
+        when(feedbackRepo.existsByComplaintId(1L)).thenReturn(false);
         ComplaintDetailResponse stub = new ComplaintDetailResponse(
                 1L, "MH20260600000123", "MH00010001", "+919999999999",
                 3L, null, "desc", null, ComplaintStatus.SUBMITTED, false,
-                null, null, null, null, List.of());
-        when(mapper.toDetailResponse(eq(c), eq("MH00010001"), any())).thenReturn(stub);
+                null, null, null, null, false, List.of());
+        when(mapper.toDetailResponse(eq(c), eq("MH00010001"), any(), eq(false))).thenReturn(stub);
 
         assertThat(service.getOwnedByTicketNo(caller, "MH20260600000123")).isSameAs(stub);
     }

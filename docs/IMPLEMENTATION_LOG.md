@@ -2493,6 +2493,58 @@ None. Pure in-process eventing; nothing persisted.
 
 ---
 
+### Stage 20.1 — FE Stage 13 carry-over (feedback discoverability)
+
+**What shipped**
+
+- `ComplaintDetailResponse.feedbackSubmitted: boolean` — lets the consumer detail screen
+  hide the Rate button on first paint (and after a tab restore) without a probe POST that
+  catches the 409. Marked `@Schema(requiredMode = REQUIRED)` so orval emits it as
+  non-optional.
+- New `GET /api/v1/consumer/complaints/{ticketNo}/feedback` returning
+  `ApiResponse<FeedbackResponse>`. Returns 200 with `data: null` when no feedback row
+  exists yet — that intentionally is **not** an error code, since "no feedback yet" is the
+  normal pre-submit state and the FE renders the panel only when data is non-null. Owner-
+  checked; foreign ticket → 403 `COMPLAINT_NOT_OWNED_BY_CONSUMER`.
+- `FeedbackRepository.findByComplaintId(Long)` for the read-back.
+- `ComplaintReadService` now injects `FeedbackRepository` and calls `existsByComplaintId`
+  on the detail path; mapper signature gained the boolean. Detail path stays one query
+  per existence check — no join needed.
+
+**Why GET-returns-null instead of 404**
+
+A 404 for "feedback not submitted yet" would force the FE into try/catch flow control and
+collide semantically with "complaint not found" (same status). Per the over-engineering
+rules: add the abstraction (an error code) the *second* time you need it. Today the
+existence flag (`feedbackSubmitted`) tells the FE whether to call GET at all; the GET only
+runs in the affirmative case, and returning `null` defensively keeps the contract trivial.
+
+**Item not actioned**
+
+- **`imageType` schema optionality** — re-verified: `docs/openapi.json` already lists
+  `imageType` under `required` (shipped in Stage 16.1's `@Schema(requiredMode = REQUIRED)`
+  annotation). FE was reading a stale spec; no BE change needed.
+
+**Tests added (5 new, total 147 unit + 8 IT)**
+
+- `ComplaintFeedbackServiceTest`:
+  - `getOwned_existing_returnsMapped`
+  - `getOwned_missing_returnsNull`
+  - `getOwned_foreignTicket_rejected` (403 leak guard, mirrors submit path)
+- `ConsumerComplaintControllerTest`:
+  - `getFeedback_existing_200`
+  - `getFeedback_missing_200_null` (asserts `$.data` does not exist)
+- `ComplaintReadServiceTest.getOwnedByTicketNo_ownedTicket_returnsDetail` updated to
+  stub the new `feedbackRepo.existsByComplaintId` call + the new mapper signature.
+
+**Build**
+
+- `./mvnw verify` green. **147 unit + 8 IT.** OpenAPI **51 paths** (unchanged — the new
+  GET reuses the existing `/feedback` path key alongside the POST). `ComplaintDetailResponse`
+  schema now lists `feedbackSubmitted` under `required`.
+
+---
+
 ## How to update this log
 
 1. At the end of a stage, append (or fill in) the corresponding subsection.
