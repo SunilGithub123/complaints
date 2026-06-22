@@ -28,6 +28,8 @@ public interface UserAccountRepository extends JpaRepository<UserAccount, Long> 
     /** True iff at least one enabled staff row references this DC (any role). */
     boolean existsByDistributionCenterIdAndEnabledTrue(Long distributionCenterId);
 
+    Optional<UserAccount> findFirstByRoleAndDistributionCenterIdAndEnabledTrue(UserRole role, Long distributionCenterId);
+
     /**
      * Paged staff search scoped to a single subdivision. {@code role}, {@code distributionCenterId},
      * and {@code enabled} are all optional filters — pass {@code null} to skip.

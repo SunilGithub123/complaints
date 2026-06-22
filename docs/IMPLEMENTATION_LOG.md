@@ -1334,6 +1334,138 @@ docs/openapi.json — unchanged at 33 paths (no controller surface changes).
 
 ---
 
+### Stage 13 — Phase 4 Stage 2 · Assignment + Triage (engineer/admin)
+
+**Refs:** TECHNICAL_DESIGN.md §5.4 · BRD §3.4 · ROADMAP.md Phase 4.
+
+#### What shipped
+
+REST surface gained five engineer/admin endpoints under `/api/v1/staff/complaints/{id}/...`:
+`assign`, `reassign`, `severity`, `reject`, `mark-duplicate`. Path-level role gate added to
+`SecurityConfig` — `hasAnyRole("ENGINEER","ADMIN")` for `/api/v1/staff/complaints/**`,
+sitting **before** the broader `/api/v1/staff/**.authenticated()` matcher. Method security
+deliberately **not** enabled — the path matcher is enough for Stage 13's surface; we revisit
+if/when we need per-method `@PreAuthorize` expressions.
+
+Two services landed in the `complaint` module:
+
+| Service | Methods | Status transitions |
+|---|---|---|
+| `ComplaintAssignmentService` | `assign`, `reassign` | `SUBMITTED → ASSIGNED` (assign); none (reassign) |
+| `ComplaintTriageService` | `updateSeverity`, `reject`, `markDuplicate` | none / `→ REJECTED` / `→ DUPLICATE` |
+
+All status changes route through `ComplaintStatusTransition.requireValid(...)` from Stage 12.
+`updateSeverity` and `reassign` are same-state edits and deliberately do **not** consult the
+validator — they only refuse on terminal states.
+
+Cross-module wiring:
+
+- New record `auth.service.StaffScopeView(userId, role, subdivisionId, distributionCenterId, enabled)`.
+- `StaffLookupService.getActiveTechnician(Long)` — throws `TECHNICIAN_NOT_FOUND` if missing,
+  disabled, or wrong role.
+- `StaffLookupService.findActiveEngineerForDc(Long)` — used on admin cross-DC reassignment to
+  re-point `assigned_engineer_id`. Backed by new repo method
+  `findFirstByRoleAndDistributionCenterIdAndEnabledTrue` (partial-unique index
+  `uq_one_active_engineer_per_dc` guarantees at most one).
+- `DistributionCenterService.getSubdivisionId(Long)` — read-only helper so the complaint
+  module can resolve DC → subdivision for admin scope checks without crossing into
+  `masterdata.repository` (ArchUnit forbids).
+
+New `ComplaintScopeGuard` (component, private to the `complaint.service` package in spirit):
+encodes the two scope rules from TD §5.4 — Engineer sees only their DC, Admin sees only their
+subdivision (via DC → subdivision lookup). Extracted on day one rather than waiting for the
+"second use" because both Phase-4 services need it in the same stage and admin scope is
+non-trivial.
+
+DTOs (all records, `jakarta.validation` on components):
+`AssignComplaintRequest`, `ReassignComplaintRequest`, `UpdateSeverityRequest`,
+`RejectComplaintRequest`, `MarkDuplicateRequest`.
+
+New `ErrorCode` entries: `TECHNICIAN_NOT_FOUND`, `COMPLAINT_OUT_OF_SCOPE`, `DUPLICATE_OF_SELF`,
+`DUPLICATE_PARENT_INVALID`, `NO_ACTIVE_ENGINEER_FOR_DC`. The pre-existing
+`TECHNICIAN_NOT_IN_DC` is reused for both engineer-DC-mismatch and admin-subdivision-mismatch
+of the chosen technician (the user-facing message is the same).
+
+Reassignment behaviour worth pinning:
+
+- Engineer caller: technician must be in same DC; `distribution_center_id` and
+  `assigned_engineer_id` are not touched.
+- Admin caller: technician may be in any DC under the admin's subdivision. When the technician
+  is in a *different* DC than the complaint, both `distribution_center_id` and
+  `assigned_engineer_id` are re-pointed to the new DC's active engineer. If that DC has no
+  active engineer → `409 NO_ACTIVE_ENGINEER_FOR_DC` (deliberate — we don't silently break the
+  partial-unique invariant).
+
+Audit trail: every operation appends a `complaint_history` row. Severity-update and
+reassignment write rows with `from_status == to_status` and an inline note (`"Severity changed
+from X to Y"`, `"Reassigned from technician X to Y"`); state transitions write
+`from != to` as usual.
+
+Concurrency: every mutation runs through `@Transactional` services on the `@Version`-annotated
+aggregate. Two concurrent assigns/reassigns to the same complaint surface as
+`COMPLAINT_VERSION_CONFLICT` (409) via the Stage 12 global handler — no service code needed
+this stage.
+
+#### Incidents / decisions
+
+1. **`/api/v1/staff/**` vs `/api/v1/engineer/**` + `/api/v1/admin/**`.** Original TD §5.4
+   sketch had separate engineer/admin URL trees. Settled on `/staff/complaints/**` because the
+   five endpoints behave identically modulo scope rules already enforced server-side — two
+   parallel trees would have doubled the controller surface and OpenAPI path count for zero
+   FE benefit. SecurityConfig matcher gates the whole subtree to `ENGINEER+ADMIN`; the role
+   distinction stays inside the services where it belongs.
+
+2. **`ComplaintScopeGuard` extracted on day one** (not waiting for the "second use" rule).
+   Justification: two services land in the same stage, and the admin branch needs a DC →
+   subdivision lookup that we did not want to inline-duplicate. Documented inline so the
+   pattern decision is auditable.
+
+3. **Reassignment does not require a state transition.** The validator's allow-table refuses
+   `ASSIGNED → ASSIGNED` (no self-edges). Reassignment is encoded as "must currently have an
+   assigned technician AND must not be in a terminal/RESOLVED/CLOSED state", checked directly
+   in the service rather than threading a synthetic transition through the validator.
+
+#### Tests
+
+- `ComplaintAssignmentServiceTest` — 4 tests: engineer happy path; engineer rejecting a
+  cross-DC technician; admin cross-DC reassignment re-pointing DC + engineer; reassign refused
+  on an unassigned complaint.
+- `ComplaintTriageServiceTest` — 6 tests: severity happy + terminal-status refusal; reject
+  happy + non-SUBMITTED refusal (state machine); mark-duplicate happy + self-reference refusal.
+- `ComplaintScopeGuardTest` — 2 tests: engineer same-DC pass; admin cross-subdivision block.
+- `StaffComplaintControllerTest` (`@WebMvcTest`) — 2 tests: assign happy → 200 envelope +
+  service delegation; reject with blank reason → 400 `VALIDATION_FAILED`.
+
+No new IT this stage — full lifecycle (consumer-submit → engineer-assign → technician-resolve
+→ close) lands as one end-to-end IT in Stage 14 once the resolution flow exists. Going earlier
+would force half the flow to be mocked, which defeats the point.
+
+#### Build status
+
+```
+[INFO] Tests run: 87, Failures: 0, Errors: 0, Skipped: 0  (Surefire — unit; +14 from Stage 12: 4+6+2+2)
+[INFO] Tests run:  7, Failures: 0, Errors: 0, Skipped: 0  (Failsafe — IT;   unchanged set, all still green)
+[INFO] BUILD SUCCESS
+docs/openapi.json — 33 → 38 paths (+5 staff complaint endpoints).
+```
+
+#### Carry-overs / known follow-ups
+
+- **Stage 14** (next slice) — `ComplaintResolutionService` (technician start → resolve),
+  `ComplaintClosureService` (engineer/admin close-on-behalf), resolution-image upload, and
+  the SLA-breach-reason-required-when-breached rule. Will reuse `ComplaintScopeGuard` and
+  `ComplaintStatusTransition` as-is.
+- **`GET /staff/complaints` (paged scope-filtered list)** — deferred to Stage 16 alongside
+  Specification-based search. FE will need a stub mock until then, but no FE work in Phase 4
+  is blocked by its absence.
+- **Domain events** — still not emitted. Will land alongside the `notification` module in
+  Phase 6/7. Triage/assignment service methods are obvious publish sites; today they only
+  log + write history rows.
+- **Cancellation (`SUBMITTED → CANCELLED` by consumer)** — Phase 5 (consumer tracking slice).
+  The transition is already allowed by the state machine.
+
+---
+
 ## How to update this log
 
 1. At the end of a stage, append (or fill in) the corresponding subsection.

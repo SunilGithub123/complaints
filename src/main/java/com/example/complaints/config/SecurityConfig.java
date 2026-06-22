@@ -57,6 +57,7 @@ public class SecurityConfig {
                                 "/api/v1/auth/consumer/**",      // OTP send + verify — public
                                 "/api/v1/consumer/**"            // gated by ConsumerVerificationFilter
                         ).permitAll()
+                        .requestMatchers("/api/v1/staff/complaints/**").hasAnyRole("ENGINEER", "ADMIN")
                         .requestMatchers("/api/v1/staff/**").authenticated()
                         .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
                         .requestMatchers("/api/v1/engineer/**").hasRole("ENGINEER")

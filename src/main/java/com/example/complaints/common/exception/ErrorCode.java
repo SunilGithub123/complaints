@@ -70,6 +70,11 @@ public enum ErrorCode {
     SLA_BREACH_REASON_REQUIRED     (HttpStatus.BAD_REQUEST,           "SLA breach reason is required for late closure"),
     PARENT_COMPLAINT_NOT_FOUND     (HttpStatus.NOT_FOUND,             "Parent complaint not found for duplicate marking"),
     TECHNICIAN_NOT_IN_DC           (HttpStatus.CONFLICT,              "Technician is not assigned to the target distribution center"),
+    TECHNICIAN_NOT_FOUND           (HttpStatus.NOT_FOUND,             "Technician account not found or inactive"),
+    COMPLAINT_OUT_OF_SCOPE         (HttpStatus.FORBIDDEN,             "Complaint is outside your assignment scope"),
+    DUPLICATE_OF_SELF              (HttpStatus.BAD_REQUEST,           "A complaint cannot be marked as a duplicate of itself"),
+    DUPLICATE_PARENT_INVALID       (HttpStatus.CONFLICT,              "Parent complaint cannot itself be a duplicate or rejected"),
+    NO_ACTIVE_ENGINEER_FOR_DC      (HttpStatus.CONFLICT,              "Target distribution center has no active engineer"),
 
     // ---------- Image upload ----------
     IMAGE_LIMIT_EXCEEDED           (HttpStatus.CONFLICT,              "Maximum number of images already uploaded"),

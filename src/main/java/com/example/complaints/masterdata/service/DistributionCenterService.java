@@ -117,5 +117,15 @@ public class DistributionCenterService {
         return repo.findById(id)
                 .orElseThrow(() -> new BusinessException(ErrorCode.DC_NOT_FOUND));
     }
+
+    /**
+     * Cross-module helper for the {@code complaint} module: returns the subdivision a DC belongs
+     * to. Throws {@link ErrorCode#DC_NOT_FOUND} for unknown ids. Stays read-only so it composes
+     * with caller transactions.
+     */
+    @Transactional(readOnly = true)
+    public Long getSubdivisionId(Long distributionCenterId) {
+        return load(distributionCenterId).getSubdivisionId();
+    }
 }
 
