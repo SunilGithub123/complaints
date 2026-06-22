@@ -54,6 +54,11 @@ final class ComplaintSpecifications {
         return (root, q, cb) -> cb.equal(root.get("assignedTechnicianId"), technicianId);
     }
 
+    static Specification<Complaint> consumerMasterIdEq(Long consumerMasterId) {
+        if (consumerMasterId == null) return null;
+        return (root, q, cb) -> cb.equal(root.get("consumerMasterId"), consumerMasterId);
+    }
+
     static Specification<Complaint> slaBreachedEq(Boolean breached) {
         if (breached == null) return null;
         return (root, q, cb) -> cb.equal(root.get("slaBreached"), breached);

@@ -2150,6 +2150,101 @@ follow-up GET after close.
 
 ---
 
+## Phase 5 — Consumer tracking, cancellation, feedback
+
+### Stage 17 — Consumer tracking list + enriched detail + safe history
+
+Closes the consumer-side read view of a complaint's lifecycle. Before Stage 17 the consumer
+could only fetch a single just-submitted complaint by ticket number (Stage 10b). Now they can
+list every complaint they've ever raised, see the SLA / resolution timestamps on the detail,
+and view the chronological status timeline — all without ever seeing internal staff IDs.
+
+#### Scope delivered
+
+- **`GET /api/v1/consumer/complaints`** — paged tracking list. Server pins
+  `consumer_master_id = caller.consumerMasterId()` via `consumerMasterIdEq(...)` spec.
+  Optional `?status=…` filter. Default sort `createdAt,desc` via `@PageableDefault`.
+- **`ComplaintDetailResponse` enriched** — added `severity`, `slaBreached`, `resolvedAt`,
+  `closedAt`. Staff identities (engineer / technician IDs), internal reasons (rejection /
+  cancellation), and audit user IDs remain on `ComplaintStaffDetailResponse` only.
+- **`GET /api/v1/consumer/complaints/{ticketNo}/history`** — chronological status timeline.
+  Returns `ConsumerComplaintHistoryEntryResponse` which is the staff history shape
+  <b>minus</b> `changedByUserId`. Owner-checked via the existing
+  `COMPLAINT_NOT_OWNED_BY_CONSUMER` path.
+- **`ConsumerComplaintListItemResponse`** — narrow list-row shape (10 fields). Drops
+  `assignedEngineerId`, `assignedTechnicianId`, `distributionCenterId`, `contactMobile`
+  vs the staff list item — consumers don't enumerate MSEB's internal allocation.
+- **`ComplaintSpecifications.consumerMasterIdEq(Long)`** — added (one-liner, mirrors
+  `technicianEq`). Both the new list service and any future consumer-search filter use it.
+- **`ComplaintReadService` now also depends on `ComplaintHistoryRepository`** — same module,
+  no ArchUnit boundary touched.
+
+#### Design decisions
+
+- **Single `ComplaintReadService` handles all 3 reads** instead of splitting into
+  `ComplaintReadService` / `ConsumerListService` / `ConsumerHistoryService`. All three are
+  owner-checked, all three depend on the same two repositories + mapper; splitting would just
+  be ceremony. The class is now ~100 lines — still well under the 300-line guidance.
+- **`ConsumerComplaintHistoryEntryResponse` is a separate record, not a filtered view of
+  `ComplaintHistoryEntryResponse`.** Records can't be "subset projected" at the type level,
+  and a JSON-view annotation hack would couple consumer + staff serializations. Two records
+  is the cheap, explicit answer.
+- **`note` field reused as-is on the consumer-safe history.** Current notes are
+  system-generated phrases ("Assigned", "Closed (SLA breached)", "SLA breached", "Marked
+  duplicate of MH…", …) — none contain PII. If consumer-visible custom notes appear later
+  we'll route them through a different field rather than retroactively redacting `note`.
+- **Status filter only on the consumer list.** No `q`, `dateRange`, `categoryId`, etc. — a
+  consumer's own list is already small (single-digit complaints per consumer typically); the
+  status dropdown covers 95% of the "all-open vs all-closed" filtering need. Easy to widen
+  later if asked.
+- **Sort whitelist deliberately not enforced.** Same posture as the staff list (Stage 16
+  carry-over): a bad client could send `sort=passwordHash,desc` and get a 400 from Spring
+  Data's `PropertyReferenceException`. Acceptable for now; revisit if it becomes a real
+  attack-surface concern.
+
+#### Tests added (5)
+
+- `ComplaintReadServiceTest.listOwned_happyPath` — verifies the scope spec is composed and
+  every row goes through the mapper.
+- `ComplaintReadServiceTest.getOwnedHistory_happyPath` + `_foreignTicket_rejected` — ownership
+  enforced before history is read.
+- `ConsumerComplaintControllerTest.list_happy_200` — MockMvc; asserts envelope + first-row
+  fields.
+- `ConsumerComplaintControllerTest.getHistory_happy_200` — MockMvc; explicitly asserts
+  `$.data[0].changedByUserId` <b>does not exist</b> (the whole point of the safe shape).
+
+Existing `ComplaintReadServiceTest` and `ConsumerComplaintControllerTest` stubs for the old
+`ComplaintDetailResponse` constructor were updated for the new shape (one-line touch each).
+The old happy / unhappy paths still cover the single-ticket detail flow.
+
+#### Incidents fixed during implementation
+
+- **None of note**. The IDE-cache import drift from Stage 16.1 recurred twice (mapper +
+  controller + test imports silently reverted after replace) — caught by the next `./mvnw`
+  compile error each time and re-applied. Logging here so we recognise the symptom faster:
+  if `cannot find symbol` appears immediately after an apparently-successful edit, re-grep
+  the imports before assuming a deeper bug.
+
+#### Build status
+
+- `./mvnw verify` green.
+- **131 unit + 8 IT**, OpenAPI **49 paths** (was 48 — added `GET /consumer/complaints/{ticketNo}/history`;
+  `GET /consumer/complaints` shares the existing path with the submit `POST`).
+
+#### Carry-overs / known follow-ups
+
+- **Stage 18 (consumer cancellation)** — next slice. `POST /api/v1/consumer/complaints/{ticketNo}/cancel`
+  with `{ reason? }`, only valid while `status == SUBMITTED`. Reuses the state-machine allow-table
+  added in Stage 12.
+- **Stage 19 (feedback)** — after Stage 18. `POST /api/v1/consumer/complaints/{ticketNo}/feedback`
+  with `{ rating: 1..5, comments? }`, only valid while `status == CLOSED`, once per complaint.
+  `Feedback` entity already exists from Stage 10b's schema; `FEEDBACK_*` error codes already in
+  the enum.
+- **Phase 6 (notifications + domain events)** — push notification on status change is the
+  obvious lever once a consumer is on the tracking screen. Out of scope for Phase 5.
+
+---
+
 ## How to update this log
 
 1. At the end of a stage, append (or fill in) the corresponding subsection.

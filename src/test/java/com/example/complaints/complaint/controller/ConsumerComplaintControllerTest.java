@@ -2,10 +2,13 @@ package com.example.complaints.complaint.controller;
 
 import com.example.complaints.auth.security.JwtFactory;
 import com.example.complaints.auth.security.VerifiedConsumer;
+import com.example.complaints.common.dto.PageResponse;
 import com.example.complaints.common.exception.BusinessException;
 import com.example.complaints.common.exception.ErrorCode;
 import com.example.complaints.common.exception.GlobalExceptionHandler;
 import com.example.complaints.complaint.dto.ComplaintDetailResponse;
+import com.example.complaints.complaint.dto.ConsumerComplaintHistoryEntryResponse;
+import com.example.complaints.complaint.dto.ConsumerComplaintListItemResponse;
 import com.example.complaints.complaint.dto.SubmitComplaintResponse;
 import com.example.complaints.complaint.model.ComplaintStatus;
 import com.example.complaints.complaint.service.ComplaintCreationService;
@@ -110,18 +113,21 @@ class ConsumerComplaintControllerTest {
     }
 
     @Test
-    @DisplayName("GET /complaints/{ticketNo} — happy path returns mapped detail")
+    @DisplayName("GET /complaints/{ticketNo} — happy path returns enriched detail")
     void get_happy_200() throws Exception {
         when(read.getOwnedByTicketNo(any(), eq("MH20260600000123"))).thenReturn(
                 new ComplaintDetailResponse(
                         1L, "MH20260600000123", "MH00010001", "+919999999999",
-                        3L, "Power outage", "Plot 17", ComplaintStatus.SUBMITTED,
-                        OffsetDateTime.now(), OffsetDateTime.now().plusHours(24), List.of()));
+                        3L, null, "Power outage", "Plot 17",
+                        ComplaintStatus.SUBMITTED, false,
+                        OffsetDateTime.now(), OffsetDateTime.now().plusHours(24),
+                        null, null, List.of()));
 
         mockMvc.perform(get("/api/v1/consumer/complaints/{t}", "MH20260600000123"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.ticketNo").value("MH20260600000123"))
-                .andExpect(jsonPath("$.data.consumerId").value("MH00010001"));
+                .andExpect(jsonPath("$.data.consumerId").value("MH00010001"))
+                .andExpect(jsonPath("$.data.slaBreached").value(false));
     }
 
     @Test
@@ -133,6 +139,36 @@ class ConsumerComplaintControllerTest {
         mockMvc.perform(get("/api/v1/consumer/complaints/{t}", "MH20260600000999"))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.error.code").value("COMPLAINT_NOT_OWNED_BY_CONSUMER"));
+    }
+
+    @Test
+    @DisplayName("GET /complaints — paged tracking list returns PageResponse envelope")
+    void list_happy_200() throws Exception {
+        ConsumerComplaintListItemResponse row = new ConsumerComplaintListItemResponse(
+                1L, "MH20260600000123", 3L, null, ComplaintStatus.RESOLVED, false,
+                null, null, null, null);
+        when(read.listOwned(any(), eq(null), any()))
+                .thenReturn(new PageResponse<>(List.of(row), 0, 20, 1L, 1, List.of("createdAt: DESC")));
+
+        mockMvc.perform(get("/api/v1/consumer/complaints"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.content[0].ticketNo").value("MH20260600000123"))
+                .andExpect(jsonPath("$.data.content[0].status").value("RESOLVED"));
+    }
+
+    @Test
+    @DisplayName("GET /complaints/{ticketNo}/history — consumer-safe rows (no changedByUserId field)")
+    void getHistory_happy_200() throws Exception {
+        when(read.getOwnedHistory(any(), eq("MH20260600000123"))).thenReturn(List.of(
+                new ConsumerComplaintHistoryEntryResponse(
+                        11L, ComplaintStatus.SUBMITTED, ComplaintStatus.ASSIGNED,
+                        "Assigned", OffsetDateTime.now())));
+
+        mockMvc.perform(get("/api/v1/consumer/complaints/{t}/history", "MH20260600000123"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data[0].toStatus").value("ASSIGNED"))
+                .andExpect(jsonPath("$.data[0].changedByUserId").doesNotExist());
     }
 }
 

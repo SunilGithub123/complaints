@@ -2,9 +2,13 @@ package com.example.complaints.complaint.controller;
 
 import com.example.complaints.auth.security.VerifiedConsumer;
 import com.example.complaints.common.dto.ApiResponse;
+import com.example.complaints.common.dto.PageResponse;
 import com.example.complaints.complaint.dto.ComplaintDetailResponse;
+import com.example.complaints.complaint.dto.ConsumerComplaintHistoryEntryResponse;
+import com.example.complaints.complaint.dto.ConsumerComplaintListItemResponse;
 import com.example.complaints.complaint.dto.SubmitComplaintRequest;
 import com.example.complaints.complaint.dto.SubmitComplaintResponse;
+import com.example.complaints.complaint.model.ComplaintStatus;
 import com.example.complaints.complaint.service.ComplaintCreationService;
 import com.example.complaints.complaint.service.ComplaintReadService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -15,6 +19,9 @@ import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.web.PageableDefault;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -23,6 +30,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
@@ -77,17 +85,45 @@ public class ConsumerComplaintController {
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.ok(body));
     }
 
+    @GetMapping
+    @Operation(
+            summary = "Paged tracking list of every complaint the verified consumer has raised",
+            description = "Server pins consumer_master_id = caller.consumerMasterId(). Optional "
+                    + "?status=… filter. Default sort is createdAt,desc (latest first)."
+    )
+    public ResponseEntity<ApiResponse<PageResponse<ConsumerComplaintListItemResponse>>> list(
+            @AuthenticationPrincipal VerifiedConsumer caller,
+            @RequestParam(required = false) ComplaintStatus status,
+            @PageableDefault(size = 20, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable
+    ) {
+        return ResponseEntity.ok(ApiResponse.ok(read.listOwned(caller, status, pageable)));
+    }
+
     @GetMapping("/{ticketNo}")
     @Operation(
             summary = "Fetch the verified consumer's own complaint by ticket number",
-            description = "Stage 10b scope: confirmation / refresh-safe read of a just-submitted "
-                    + "complaint. Lifecycle history, technician identity and feedback land in Phase 5."
+            description = "Owner-checked. Stage 17 enriched the payload with severity, "
+                    + "slaBreached, resolvedAt, closedAt. Staff identities and internal "
+                    + "reason fields remain on the staff-side DTO only."
     )
     public ResponseEntity<ApiResponse<ComplaintDetailResponse>> getByTicket(
             @AuthenticationPrincipal VerifiedConsumer caller,
             @PathVariable String ticketNo
     ) {
         return ResponseEntity.ok(ApiResponse.ok(read.getOwnedByTicketNo(caller, ticketNo)));
+    }
+
+    @GetMapping("/{ticketNo}/history")
+    @Operation(
+            summary = "Consumer-safe status-change history for an owned complaint",
+            description = "Same chronological ordering as the staff endpoint, but without "
+                    + "changedByUserId — consumers don't see staff IDs."
+    )
+    public ResponseEntity<ApiResponse<List<ConsumerComplaintHistoryEntryResponse>>> getHistory(
+            @AuthenticationPrincipal VerifiedConsumer caller,
+            @PathVariable String ticketNo
+    ) {
+        return ResponseEntity.ok(ApiResponse.ok(read.getOwnedHistory(caller, ticketNo)));
     }
 
     /**

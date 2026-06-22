@@ -6,6 +6,8 @@ import com.example.complaints.complaint.dto.ComplaintHistoryEntryResponse;
 import com.example.complaints.complaint.dto.ComplaintImageResponse;
 import com.example.complaints.complaint.dto.ComplaintListItemResponse;
 import com.example.complaints.complaint.dto.ComplaintStaffDetailResponse;
+import com.example.complaints.complaint.dto.ConsumerComplaintHistoryEntryResponse;
+import com.example.complaints.complaint.dto.ConsumerComplaintListItemResponse;
 import com.example.complaints.complaint.dto.SubmitComplaintResponse;
 import com.example.complaints.complaint.model.Complaint;
 import com.example.complaints.complaint.model.ComplaintHistory;
@@ -53,12 +55,41 @@ public class ComplaintMapper {
                 consumerId,
                 c.getContactMobile(),
                 c.getCategoryId(),
+                c.getSeverity(),
                 c.getDescription(),
                 c.getLocation(),
                 c.getStatus(),
+                c.isSlaBreached(),
                 DateUtils.toIst(c.getCreatedAt()),
                 DateUtils.toIst(c.getSlaDeadline()),
+                DateUtils.toIst(c.getResolvedAt()),
+                DateUtils.toIst(c.getClosedAt()),
                 images.stream().map(this::toImageResponse).toList()
+        );
+    }
+
+    public ConsumerComplaintListItemResponse toConsumerListItem(Complaint c) {
+        return new ConsumerComplaintListItemResponse(
+                c.getId(),
+                c.getTicketNo(),
+                c.getCategoryId(),
+                c.getSeverity(),
+                c.getStatus(),
+                c.isSlaBreached(),
+                DateUtils.toIst(c.getCreatedAt()),
+                DateUtils.toIst(c.getSlaDeadline()),
+                DateUtils.toIst(c.getResolvedAt()),
+                DateUtils.toIst(c.getClosedAt())
+        );
+    }
+
+    public ConsumerComplaintHistoryEntryResponse toConsumerHistoryResponse(ComplaintHistory h) {
+        return new ConsumerComplaintHistoryEntryResponse(
+                h.getId(),
+                h.getFromStatus(),
+                h.getToStatus(),
+                h.getNote(),
+                DateUtils.toIst(h.getChangedAt())
         );
     }
 

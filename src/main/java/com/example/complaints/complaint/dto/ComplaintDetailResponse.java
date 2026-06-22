@@ -1,15 +1,21 @@
 package com.example.complaints.complaint.dto;
 
+import com.example.complaints.complaint.model.ComplaintSeverity;
 import com.example.complaints.complaint.model.ComplaintStatus;
 
 import java.time.OffsetDateTime;
 import java.util.List;
 
 /**
- * Response body for {@code GET /api/v1/consumer/complaints/{ticketNo}}. Stage 10b scope is the
- * confirmation / re-fetch view — enough to render the post-submit screen and survive a refresh.
- * Lifecycle history, technician identity, resolution notes, and feedback are intentionally
- * <b>not</b> exposed here; those land in Phase 5's consumer tracking slice.
+ * Response body for {@code GET /api/v1/consumer/complaints/{ticketNo}} (Stage 17 enriched).
+ * Carries the consumer-safe lifecycle view: severity, SLA-breach flag, resolution / closure
+ * timestamps. Staff identities (engineer / technician IDs), internal reasons (rejection /
+ * cancellation), and audit user IDs are <b>never</b> exposed here — those stay on
+ * {@link ComplaintStaffDetailResponse}.
+ *
+ * <p>History lives on its own endpoint ({@code /history}) so the detail payload stays bounded;
+ * the consumer-safe history shape ({@link ConsumerComplaintHistoryEntryResponse}) likewise
+ * omits {@code changedByUserId}.</p>
  */
 public record ComplaintDetailResponse(
         Long id,
@@ -17,12 +23,15 @@ public record ComplaintDetailResponse(
         String consumerId,
         String contactMobile,
         Long categoryId,
+        ComplaintSeverity severity,
         String description,
         String location,
         ComplaintStatus status,
+        boolean slaBreached,
         OffsetDateTime submittedAt,
         OffsetDateTime slaDeadline,
+        OffsetDateTime resolvedAt,
+        OffsetDateTime closedAt,
         List<ComplaintImageResponse> images
 ) {
 }
-
