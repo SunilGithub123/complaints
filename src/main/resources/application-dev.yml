@@ -6,6 +6,10 @@ spring:
 
   flyway:
     locations: classpath:db/migration,classpath:db/migration-dev
+    # Dev-only: V1000.x seed migrations are applied before each new V1.x lands on disk,
+    # so any later V1.x is "out of order" relative to V1000.x. Strict ordering is enforced
+    # in test/prod profiles; dev is allowed to backfill. Never enable this in prod.
+    out-of-order: true
 
   cache:
     type: caffeine

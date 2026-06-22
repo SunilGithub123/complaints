@@ -1,6 +1,7 @@
 package com.example.complaints.complaint.dto;
 
 import com.example.complaints.complaint.model.ComplaintImageType;
+import io.swagger.v3.oas.annotations.media.Schema;
 
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -15,6 +16,8 @@ import java.util.List;
  */
 public record ComplaintImageResponse(
         Long id,
+        @Schema(requiredMode = Schema.RequiredMode.REQUIRED,
+                description = "Source of the image: consumer-submitted vs technician-uploaded at resolution.")
         ComplaintImageType imageType,
         String contentType,
         int sizeBytes,
