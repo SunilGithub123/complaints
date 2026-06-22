@@ -5,6 +5,7 @@ import com.example.complaints.auth.dto.LoginRequest;
 import com.example.complaints.auth.dto.LoginResponse;
 import com.example.complaints.auth.dto.RefreshTokenRequest;
 import com.example.complaints.auth.dto.StaffSummaryResponse;
+import com.example.complaints.auth.dto.UpdateMyProfileRequest;
 import com.example.complaints.auth.security.AuthenticatedStaff;
 import com.example.complaints.auth.service.StaffAuthService;
 import com.example.complaints.common.dto.ApiResponse;
@@ -17,6 +18,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -70,6 +72,19 @@ public class StaffAuthController {
     public ResponseEntity<ApiResponse<StaffSummaryResponse>> me(@AuthenticationPrincipal AuthenticatedStaff me) {
         requireAuth(me);
         return ResponseEntity.ok(ApiResponse.ok(authService.me(me.userId())));
+    }
+
+    @PutMapping("/me")
+    @Operation(summary = "Update my profile (self-service)",
+            description = "Updates the caller's own mutable profile fields: fullName, email, "
+                    + "mobile, notificationsPushEnabled. Scope fields (role, subdivisionId, "
+                    + "distributionCenterId, employeeId) are immutable here — those are admin "
+                    + "actions via PUT /api/v1/admin/staff/{id}.")
+    public ResponseEntity<ApiResponse<StaffSummaryResponse>> updateMyProfile(
+            @AuthenticationPrincipal AuthenticatedStaff me,
+            @Valid @RequestBody UpdateMyProfileRequest req) {
+        requireAuth(me);
+        return ResponseEntity.ok(ApiResponse.ok(authService.updateMyProfile(me.userId(), req)));
     }
 
     private static void requireAuth(AuthenticatedStaff me) {

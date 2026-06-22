@@ -4,6 +4,7 @@ import com.example.complaints.auth.dto.ChangePasswordRequest;
 import com.example.complaints.auth.dto.LoginRequest;
 import com.example.complaints.auth.dto.LoginResponse;
 import com.example.complaints.auth.dto.RefreshTokenRequest;
+import com.example.complaints.auth.dto.UpdateMyProfileRequest;
 import com.example.complaints.auth.mapper.UserAccountMapper;
 import com.example.complaints.auth.model.RefreshToken;
 import com.example.complaints.auth.model.UserAccount;
@@ -147,6 +148,34 @@ class StaffAuthServiceTest {
         assertThatThrownBy(() -> service.refresh(new RefreshTokenRequest(preChangeRefresh)))
                 .isInstanceOf(BusinessException.class)
                 .extracting("errorCode").isEqualTo(ErrorCode.REFRESH_TOKEN_INVALID);
+    }
+
+    @Test
+    @DisplayName("updateMyProfile: happy path mutates fullName / email / mobile / push and returns updated summary")
+    void updateMyProfile_success() {
+        when(users.findById(admin.getId())).thenReturn(Optional.of(admin));
+
+        var res = service.updateMyProfile(admin.getId(),
+                new UpdateMyProfileRequest("New Name", "new@example.in", "+919999999999", false));
+
+        assertThat(res.fullName()).isEqualTo("New Name");
+        assertThat(res.notificationsPushEnabled()).isFalse();
+        // Entity reflects the change (dirty-checking will flush on commit).
+        assertThat(admin.getFullName()).isEqualTo("New Name");
+        assertThat(admin.getEmail()).isEqualTo("new@example.in");
+        assertThat(admin.getMobile()).isEqualTo("+919999999999");
+        assertThat(admin.isNotificationsPushEnabled()).isFalse();
+    }
+
+    @Test
+    @DisplayName("updateMyProfile: account vanished mid-request throws UNAUTHORIZED")
+    void updateMyProfile_userMissing() {
+        when(users.findById(admin.getId())).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.updateMyProfile(admin.getId(),
+                new UpdateMyProfileRequest("X", null, null, true)))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode").isEqualTo(ErrorCode.UNAUTHORIZED);
     }
 }
 

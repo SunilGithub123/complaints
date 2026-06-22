@@ -567,7 +567,121 @@ FE-side list lives in the FE log.
 
 ---
 
-### Stage 8 · Frontend profile editor + proactive `useMe` at boot — ☐ not started
+### Stage 8 · Frontend profile editor + proactive `useMe` at boot — 🟡 partially shipped
+
+Stage 8 split into three ships across the two repos:
+
+- **Stage 8a** — FE-led: boot-time `useMe` revalidation in `RequireAuth`. **✅ 2026-06-22.**
+- **Stage 8b prerequisite** — BE-led: new `PUT /api/v1/staff/me` endpoint. **✅ 2026-06-22.**
+- **Stage 8b** — FE-led: self-service profile editor screen. **☐ pending FE re-sync** of the now-updated `openapi.json` → `pnpm api:gen` → ship the screen.
+
+---
+
+#### Stage 8a · FE boot-time `useMe` revalidation — ✅ 2026-06-22 (no backend changes required)
+
+> Source of truth for the FE-side scope, incidents, tests, and build status is
+> [`complaints-frontend/docs/IMPLEMENTATION_LOG.md`](../../complaints-frontend/docs/IMPLEMENTATION_LOG.md)
+> (Stage 8a entry).
+
+##### Backend impact
+
+- **Zero code changes on the backend.** Existing `GET /api/v1/staff/me` (shipped in Stage 1) was sufficient. The FE's boot-time call uses the same access JWT it would have used for any other authenticated request, so the existing 401-then-refresh-once flow on `customFetch` covers the unhappy path without any BE involvement.
+- **No new BE incidents.** The endpoint behaved end-to-end as documented.
+
+##### FE half summary (cross-referenced)
+
+- `authStore.ts` gained `lastValidatedAt: number | null` (in-memory only, not persisted), a `setValidatedStaff(staff)` mutator, and a `selectLastValidatedAt` selector. `setSession` / `setTokens` reset it to `null` so the boot guard re-arms after login / change-password / silent refresh.
+- `RequireAuth` fires the generated `useMe()` once per cold session (gated by `enabled: isAuthed && lastValidatedAt === null`). While in flight → route-Suspense skeleton; on success → commits server-truth staff into the store **before** rendering children, so `RequireRole` and the role-aware nav pick up demotions / promotions automatically; on error → falls through to the cached snapshot (the `customFetch` transport already owns the 401 → refresh-fail → `auth:logout` path, so no second logout branch was added here).
+- 2 new tests in `RequireAuth.test.tsx` (happy: role change committed before children render; unhappy: useMe error → cached snapshot, no extra logout fired).
+- Gates: `typecheck` ✅ · 10/10 tests ✅ · `build` ✅ · entry chunk **137.20 KB gzipped** (180 KB budget · 42.80 KB headroom · +4.11 KB vs Stage 7).
+
+##### Closed carry-overs
+
+- **Stage 4 carry-over** — *"`useMe` proactive call at boot is deferred (Phase 2)"* — **CLOSED by 8a.** The FE no longer holds a stale staff snapshot across cold loads; any server-side role / DC / subdivision change becomes visible on the next refresh without re-login.
+- The Stage 4 caveat that any **removal** of a field from `StaffSummaryResponse` would be a breaking change for cached FE state still applies until persisted store-shape migration lands (deferred; no concrete pressure yet).
+
+---
+
+#### Stage 8b prerequisite · Backend `PUT /api/v1/staff/me` — ✅ 2026-06-22
+
+> Tiny BE slice shipped *while* the FE was implementing Stage 8a in parallel.
+> The FE Stage 8b screen (self-service profile editor) depends on this endpoint;
+> the rest of Stage 8 stays FE-led.
+
+##### Scope delivered
+
+**DTO** (`auth.dto.UpdateMyProfileRequest`, record)
+- Fields: `fullName` (`@NotBlank @Size(max=200)`), `email` (`@Email @Size(max=200)`, optional), `mobile` (`@Pattern("^\\+?[0-9]{7,15}$")`, optional), `notificationsPushEnabled` (`@NotNull Boolean`).
+- Validation matches the existing admin-side `UpdateStaffRequest` so the FE form can reuse the same Zod schema. Scope fields (`employeeId`, `role`, `subdivisionId`, `distributionCenterId`) are deliberately **absent** — scope changes stay an admin action via `PUT /api/v1/admin/staff/{id}`. Documented in the record's Javadoc.
+
+**Service** (`auth.service.StaffAuthService`)
+- New `updateMyProfile(Long userId, UpdateMyProfileRequest req)` returning `StaffSummaryResponse`.
+- Lives on `StaffAuthService` (alongside `me()`, `changePassword()`) — *not* on `StaffAdminService` (different capability: self-edit vs admin-edit; SRP).
+- Loads the row via `users.findById(userId)`; if the account vanished between auth and call (deleted by an admin in another session) → `UNAUTHORIZED`, matching the `me()` pattern.
+- Mutates `fullName` / `email` / `mobile` / `notificationsPushEnabled` only; Hibernate dirty-checking flushes on commit.
+
+**Controller** (`auth.controller.StaffAuthController`)
+- `PUT /api/v1/staff/me` — authenticated, allowed during `passwordResetRequired=true` (already on `PasswordResetRequiredFilter`'s allow-list alongside `/me`, `/change-password`, `/logout`). `@AuthenticationPrincipal AuthenticatedStaff me` + `@Valid @RequestBody UpdateMyProfileRequest`.
+- Same `requireAuth(me)` defensive check the other endpoints use.
+- Springdoc `@Operation` describes the immutability of scope fields explicitly so FE codegen and Swagger UI both surface it.
+
+**OpenAPI snapshot** (`docs/openapi.json`)
+- `OpenApiExportIT` re-snapshotted on `mvn verify`. New entry: `/api/v1/staff/me` `PUT` → `ApiResponseStaffSummaryResponse`. New schema: `UpdateMyProfileRequest`. Path count: 28 → 29.
+
+##### Incidents fixed during implementation
+
+| # | Symptom | Root cause | Fix |
+|---|---------|-----------|-----|
+| 1 | `StaffAuthControllerTest.updateMyProfile_success` got `401 UNAUTHORIZED` instead of 200 even though `with(authedEngineer())` injected an `AuthenticatedStaff` principal exactly like `StaffAdminControllerTest` does. | `@AutoConfigureMockMvc(addFilters = false)` removes Spring Security's `SecurityContextHolderFilter`. `SecurityMockMvcRequestPostProcessors.user(UserDetails)` writes the SecurityContext into the request's session, expecting that filter to copy it into `SecurityContextHolder` at request-time. With filters off, that hop is missing → `SecurityContextHolder` stays empty → `@AuthenticationPrincipal` resolves to `null` → `requireAuth(me)` throws. `StaffAdminControllerTest` never noticed because its `service.create(any(), any())` mock returns the canned response regardless of `me`. | Switched `StaffAuthControllerTest` to populate `SecurityContextHolder` directly via a tiny `authenticate(AuthenticatedStaff)` helper + `@AfterEach clearContext()`. Dropped the `user(...)` post-processor entirely. The fragility is documented inline in the helper's Javadoc so the next person doesn't re-hit it. (We did not promote this to a copilot-instructions update — it only matters when an `addFilters=false` test asserts on `@AuthenticationPrincipal`, which is rare; the Javadoc trail is enough.) |
+
+##### Tests added
+
+Minimum-test policy applied: 1 happy + 1 unhappy per layer.
+
+- `auth/service/StaffAuthServiceTest` — +2 tests:
+  - happy `updateMyProfile` (mutates fullName / email / mobile / push; entity reflects the change so dirty-check flushes on commit; returned summary mirrors the new state).
+  - account vanished mid-request → `UNAUTHORIZED`.
+- `auth/controller/StaffAuthControllerTest` — +2 tests:
+  - happy `PUT /api/v1/staff/me` → 200 + envelope contains updated `fullName` + `notificationsPushEnabled=false`.
+  - blank `fullName` → 400 + `VALIDATION_FAILED`.
+
+##### Build status
+
+```
+[INFO] Tests run: 31, Failures: 0, Errors: 0  (Surefire — unit;  +4 from Stage 6 baseline)
+[INFO] Tests run:  4, Failures: 0, Errors: 0  (Failsafe — IT; unchanged set)
+[INFO] BUILD SUCCESS
+docs/openapi.json — 29 paths (was 28); +1 PUT /api/v1/staff/me, +1 schema UpdateMyProfileRequest.
+```
+
+##### Carry-overs / known follow-ups
+
+- **`PATCH /api/v1/staff/me/notification-preferences`** is **not** shipped. Per Stage 8 prompt: optional; the FE will use the same `PUT /me` to toggle the push flag for v1. Revisit if we ever need partial-update semantics (e.g. consumer-style preference granularity in Phase 6).
+- **Audit event** (`MyProfileUpdatedEvent`) — defer to the `audit` module (Phase 7), same pattern as Stage 5's staff writes.
+- **Mobile-uniqueness** — we don't currently enforce mobile to be unique across staff. If we ever do (e.g. for SMS-based MFA in Phase 7), this endpoint must add the same `STAFF_MOBILE_TAKEN` check the admin-side `update` will need.
+- **`StaffAuthControllerTest` security-context fragility** — the new helper documents why we populate `SecurityContextHolder` manually. If future tests in this class start asserting on `@AuthenticationPrincipal`, call `authenticate(...)` at the top of the test. Re-using `with(user(...))` will silently leave `me = null` again under `addFilters=false`.
+
+---
+
+#### Stage 8b · FE profile editor — ☐ unblocked, awaiting FE re-sync
+
+The BE `PUT /api/v1/staff/me` endpoint and refreshed `openapi.json` (29
+paths, includes the new `UpdateMyProfileRequest` schema) shipped before
+Stage 8a wrapped — the FE agent picked up an older snapshot during 8a so
+the generated client did not yet contain the write hook, and 8b was
+correctly parked rather than stubbing a fake endpoint.
+
+**Unblock procedure** for the FE:
+
+```bash
+# from complaints-frontend/
+cp ../complaints/docs/openapi.json packages/api/openapi.json
+pnpm api:gen
+# generated client now exposes the PUT /staff/me hook
+```
+
+Then resume the Stage 8b prompt (profile editor screen + change-password
+CTA + EN/MR strings + 2-test slice).
 
 ---
 

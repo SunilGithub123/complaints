@@ -5,6 +5,7 @@ import com.example.complaints.auth.dto.LoginRequest;
 import com.example.complaints.auth.dto.LoginResponse;
 import com.example.complaints.auth.dto.RefreshTokenRequest;
 import com.example.complaints.auth.dto.StaffSummaryResponse;
+import com.example.complaints.auth.dto.UpdateMyProfileRequest;
 import com.example.complaints.auth.mapper.UserAccountMapper;
 import com.example.complaints.auth.model.RefreshToken;
 import com.example.complaints.auth.model.UserAccount;
@@ -144,6 +145,23 @@ public class StaffAuthService {
         return users.findById(userId)
                 .map(mapper::toSummary)
                 .orElseThrow(() -> new BusinessException(ErrorCode.UNAUTHORIZED));
+    }
+
+    /**
+     * Self-service profile edit. Mutates only the caller's own mutable fields
+     * (fullName, email, mobile, notificationsPushEnabled). Scope fields
+     * (subdivisionId / distributionCenterId / role / employeeId) stay immutable
+     * here — those are admin actions via {@code PUT /api/v1/admin/staff/{id}}.
+     */
+    @Transactional
+    public StaffSummaryResponse updateMyProfile(Long userId, UpdateMyProfileRequest req) {
+        UserAccount user = users.findById(userId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.UNAUTHORIZED));
+        user.setFullName(req.fullName());
+        user.setEmail(req.email());
+        user.setMobile(req.mobile());
+        user.setNotificationsPushEnabled(req.notificationsPushEnabled());
+        return mapper.toSummary(user);
     }
 
     // ----- helpers -----
