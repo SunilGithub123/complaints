@@ -6,6 +6,7 @@ import com.example.complaints.common.exception.ErrorCode;
 import com.example.complaints.complaint.dto.SubmitComplaintRequest;
 import com.example.complaints.complaint.dto.SubmitComplaintResponse;
 import com.example.complaints.complaint.mapper.ComplaintMapper;
+import com.example.complaints.complaint.event.ComplaintSubmittedEvent;
 import com.example.complaints.complaint.model.Complaint;
 import com.example.complaints.complaint.model.ComplaintHistory;
 import com.example.complaints.complaint.model.ComplaintStatus;
@@ -19,6 +20,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.context.ApplicationEventPublisher;
 
 import java.time.Instant;
 import java.util.List;
@@ -41,6 +43,7 @@ class ComplaintCreationServiceTest {
     private ComplaintHistoryRepository historyRepo;
     private ComplaintImageService imageService;
     private ComplaintMapper mapper;
+    private ApplicationEventPublisher events;
     private ComplaintCreationService service;
 
     private final VerifiedConsumer caller =
@@ -55,8 +58,9 @@ class ComplaintCreationServiceTest {
         historyRepo = mock(ComplaintHistoryRepository.class);
         imageService = mock(ComplaintImageService.class);
         mapper = mock(ComplaintMapper.class);
+        events = mock(ApplicationEventPublisher.class);
         service = new ComplaintCreationService(consumerLookup, categoryService, ticketNumberService,
-                complaintRepo, historyRepo, imageService, mapper);
+                complaintRepo, historyRepo, imageService, mapper, events);
     }
 
     @Test
@@ -98,6 +102,7 @@ class ComplaintCreationServiceTest {
         assertThat(hist.getValue().getFromStatus()).isNull();
         assertThat(hist.getValue().getToStatus()).isEqualTo(ComplaintStatus.SUBMITTED);
         verify(imageService).storeAll(555L, List.of());
+        verify(events).publishEvent(any(ComplaintSubmittedEvent.class));
     }
 
     @Test

@@ -4,6 +4,7 @@ import com.example.complaints.auth.security.VerifiedConsumer;
 import com.example.complaints.common.exception.BusinessException;
 import com.example.complaints.common.exception.ErrorCode;
 import com.example.complaints.complaint.dto.CancelComplaintRequest;
+import com.example.complaints.complaint.event.ComplaintCancelledEvent;
 import com.example.complaints.complaint.model.Complaint;
 import com.example.complaints.complaint.model.ComplaintHistory;
 import com.example.complaints.complaint.model.ComplaintStatus;
@@ -13,12 +14,14 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.context.ApplicationEventPublisher;
 
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -26,6 +29,7 @@ class ComplaintCancellationServiceTest {
 
     private ComplaintRepository complaints;
     private ComplaintHistoryRepository history;
+    private ApplicationEventPublisher events;
     private ComplaintCancellationService service;
 
     private final VerifiedConsumer caller =
@@ -35,7 +39,8 @@ class ComplaintCancellationServiceTest {
     void setUp() {
         complaints = mock(ComplaintRepository.class);
         history = mock(ComplaintHistoryRepository.class);
-        service = new ComplaintCancellationService(complaints, history);
+        events = mock(ApplicationEventPublisher.class);
+        service = new ComplaintCancellationService(complaints, history, events);
     }
 
     @Test
@@ -56,6 +61,7 @@ class ComplaintCancellationServiceTest {
         assertThat(saved.getToStatus()).isEqualTo(ComplaintStatus.CANCELLED);
         assertThat(saved.getChangedByUserId()).isNull();    // consumer actor → null
         assertThat(saved.getNote()).contains("MH00010001"); // external id captured in note
+        verify(events).publishEvent(any(ComplaintCancelledEvent.class));
     }
 
     @Test

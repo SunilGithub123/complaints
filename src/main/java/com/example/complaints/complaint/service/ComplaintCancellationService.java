@@ -4,6 +4,7 @@ import com.example.complaints.auth.security.VerifiedConsumer;
 import com.example.complaints.common.exception.BusinessException;
 import com.example.complaints.common.exception.ErrorCode;
 import com.example.complaints.complaint.dto.CancelComplaintRequest;
+import com.example.complaints.complaint.event.ComplaintCancelledEvent;
 import com.example.complaints.complaint.model.Complaint;
 import com.example.complaints.complaint.model.ComplaintHistory;
 import com.example.complaints.complaint.model.ComplaintStatus;
@@ -12,6 +13,7 @@ import com.example.complaints.complaint.repository.ComplaintHistoryRepository;
 import com.example.complaints.complaint.repository.ComplaintRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -36,6 +38,8 @@ public class ComplaintCancellationService {
 
     private final ComplaintRepository complaints;
     private final ComplaintHistoryRepository history;
+
+    private final ApplicationEventPublisher events;
 
     @Transactional
     public void cancel(VerifiedConsumer caller, String ticketNo, CancelComplaintRequest req) {
@@ -66,6 +70,10 @@ public class ComplaintCancellationService {
                 .changedByUserId(null)
                 .note("Cancelled by consumer " + caller.consumerId())
                 .build());
+
+        events.publishEvent(new ComplaintCancelledEvent(
+                c.getId(), c.getTicketNo(), c.getConsumerMasterId(),
+                caller.consumerId(), c.getDistributionCenterId(), c.getCancellationReason()));
 
         log.info("Consumer {} cancelled complaint {}", caller.consumerId(), c.getId());
     }

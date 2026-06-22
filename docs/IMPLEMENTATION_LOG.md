@@ -2408,6 +2408,91 @@ access. Phase 6 (notifications + domain events) is now the natural next phase.
 
 ---
 
+## Phase 6 — Notifications & domain events
+
+### Stage 20 — Domain events foundation
+
+**What shipped**
+
+- New package `com.example.complaints.complaint.event` with a sealed marker interface
+  `ComplaintEvent` and 9 record events (one per business moment): `ComplaintSubmittedEvent`,
+  `ComplaintAssignedEvent`, `ComplaintReassignedEvent`, `ComplaintResolvedEvent`,
+  `ComplaintClosedEvent`, `ComplaintCancelledEvent`, `ComplaintRejectedEvent`,
+  `SlaBreachedEvent`, `FeedbackSubmittedEvent`. All carry primitive IDs only (no JPA
+  entities) so a Stage-21 `AFTER_COMMIT` listener can never trip lazy-loading.
+- Wired `ApplicationEventPublisher` into 8 services (`ComplaintCreationService`,
+  `ComplaintAssignmentService` × 2 paths, `ComplaintTriageService.reject`,
+  `ComplaintResolutionService.resolve`, `ComplaintClosureService.close`,
+  `ComplaintCancellationService.cancel`, `ComplaintFeedbackService.submit`,
+  `SlaMonitorService.markBreached`). Publish call sits after the `history.save(...)` row so
+  the listener sees a complete audit trail when it fires.
+- `ComplaintEventLogger` (debug-only listener) with two methods: an
+  `@TransactionalEventListener(phase = AFTER_COMMIT)` at INFO and a synchronous
+  `@EventListener` at DEBUG. Proves wiring without any external side effects. Will be
+  replaced / supplemented by real notification listeners in Stage 21.
+
+**Why a sealed interface over a marker annotation**
+
+Sealing the hierarchy lets Stage-21 dispatch code use exhaustive `switch` (Java 21
+pattern-matching) over `ComplaintEvent` — the compiler will flag any new event that
+forgets a listener branch. An annotation-based marker would have given us no such check.
+
+**Schema / migrations**
+
+None. Pure in-process eventing; nothing persisted.
+
+**Tests added**
+
+- Each of the 8 existing happy-path service tests gained one
+  `verify(events).publishEvent(any(XxxEvent.class));` assertion. High-signal per the test
+  policy ("would I miss this in prod?" — yes, a silently-missed publish would mean no
+  notification ever fires in Stage 21).
+- No new dedicated event listener tests yet — `ComplaintEventLogger` is intentionally
+  a debug aid and will be torn out in Stage 21.
+
+**Incidents fixed during implementation**
+
+- **`SlaMonitorService.java` corrupted by stray `\u0001` (SOH) bytes + lost `@Scheduled`
+  import** between successive edits. The IDE-cache import drift recurred and this time
+  the auto-reformatter also injected a non-printable control char into the import block,
+  which the Java compiler reported as `illegal character: '\u0001'`. Recovered by writing
+  a Python cleanup script that stripped SOH chars from every `.java` under
+  `src/main/java/com/example/complaints/complaint/` and re-inserted the missing import via
+  a deterministic anchor. Same pattern hit `ComplaintResolutionService` and
+  `ComplaintClosureService` (lost their `ApplicationEventPublisher` import).
+- **Test-side patching of 8 services in one sweep** — initially attempted via repeated
+  `replace_string_in_file` calls; rapidly diverged because some test classes used
+  multi-line constructor calls and others single-line, with different mock field
+  conventions. Switched to a Python script (`/tmp/patch_tests.py`) that uses anchored
+  regexes — landed all 8 in one shot.
+- **`verify(events).publishEvent(...)` placed against the wrong happy-path method** for
+  `ComplaintTriageServiceTest` (script picked `updateSeverity_happyPath` instead of
+  `reject_happyPath`) and `ComplaintResolutionServiceTest` (`start_happyPath` instead of
+  `resolve_onTime_happyPath`). Surface failure was "Wanted but not invoked: zero
+  interactions with this mock" — clear signal, fixed by moving the assertion to the
+  correct method. `SlaMonitorService.markBreached` publishes per-overdue-complaint, so
+  the assertion uses `times(2)` to match the 2 overdue rows the test sets up.
+
+**Build status**
+
+- `./mvnw verify` green.
+- **142 unit + 8 IT**, OpenAPI **51 paths** (unchanged — no new HTTP surface; events are
+  internal). Test count holds at 142 because we replaced the wrong placements rather than
+  adding extras.
+
+**Carry-overs / known follow-ups**
+
+- **Stage 21**: real notification module — per-event listeners that fan out to FCM (push)
+  + console SMS (mock) per role. Will introduce `notification/` top-level package.
+- **Stage 22**: persistence of in-app notifications + read-state per user (table +
+  unread-count endpoint).
+- **No event-bus IT yet** — once Stage 21 lands a real listener with observable side
+  effects, we'll add one `@SpringBootTest` that publishes a real event and asserts the
+  listener observed it after `AFTER_COMMIT`. Doing it now (against a debug logger) would
+  test nothing.
+
+---
+
 ## How to update this log
 
 1. At the end of a stage, append (or fill in) the corresponding subsection.

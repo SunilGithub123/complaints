@@ -6,6 +6,7 @@ import com.example.complaints.common.exception.ErrorCode;
 import com.example.complaints.common.util.DateUtils;
 import com.example.complaints.complaint.dto.SubmitComplaintRequest;
 import com.example.complaints.complaint.dto.SubmitComplaintResponse;
+import com.example.complaints.complaint.event.ComplaintSubmittedEvent;
 import com.example.complaints.complaint.mapper.ComplaintMapper;
 import com.example.complaints.complaint.model.Complaint;
 import com.example.complaints.complaint.model.ComplaintHistory;
@@ -19,6 +20,7 @@ import com.example.complaints.masterdata.model.ComplaintCategory;
 import com.example.complaints.masterdata.service.ComplaintCategoryService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -53,6 +55,7 @@ public class ComplaintCreationService {
     private final ComplaintHistoryRepository historyRepo;
     private final ComplaintImageService imageService;
     private final ComplaintMapper mapper;
+    private final ApplicationEventPublisher events;
 
     @Transactional
     public SubmitComplaintResponse submit(VerifiedConsumer caller,
@@ -69,6 +72,10 @@ public class ComplaintCreationService {
         historyRepo.save(initialHistory(saved));
 
         List<ComplaintImage> savedImages = imageService.storeAll(saved.getId(), images);
+
+        events.publishEvent(new ComplaintSubmittedEvent(
+                saved.getId(), saved.getTicketNo(), saved.getConsumerMasterId(),
+                saved.getContactMobile(), saved.getCategoryId(), saved.getDistributionCenterId()));
 
         log.info("Consumer {} submitted complaint {} (category {}, {} images)",
                 caller.consumerId(), ticketNo, category.getId(), savedImages.size());

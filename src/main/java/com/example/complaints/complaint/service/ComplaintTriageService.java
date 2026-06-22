@@ -6,6 +6,7 @@ import com.example.complaints.common.exception.ErrorCode;
 import com.example.complaints.complaint.dto.MarkDuplicateRequest;
 import com.example.complaints.complaint.dto.RejectComplaintRequest;
 import com.example.complaints.complaint.dto.UpdateSeverityRequest;
+import com.example.complaints.complaint.event.ComplaintRejectedEvent;
 import com.example.complaints.complaint.model.Complaint;
 import com.example.complaints.complaint.model.ComplaintHistory;
 import com.example.complaints.complaint.model.ComplaintSeverity;
@@ -15,6 +16,7 @@ import com.example.complaints.complaint.repository.ComplaintHistoryRepository;
 import com.example.complaints.complaint.repository.ComplaintRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -34,6 +36,8 @@ public class ComplaintTriageService {
     private final ComplaintRepository complaints;
     private final ComplaintHistoryRepository history;
     private final ComplaintScopeGuard scope;
+
+    private final ApplicationEventPublisher events;
 
     @Transactional
     public void updateSeverity(AuthenticatedStaff caller, Long complaintId, UpdateSeverityRequest req) {
@@ -63,6 +67,9 @@ public class ComplaintTriageService {
         c.setStatus(ComplaintStatus.REJECTED);
         c.setRejectionReason(req.reason());
         appendHistory(c.getId(), previous, ComplaintStatus.REJECTED, caller.userId(), req.reason());
+        events.publishEvent(new ComplaintRejectedEvent(
+                c.getId(), c.getTicketNo(), c.getConsumerMasterId(),
+                c.getDistributionCenterId(), req.reason(), caller.userId()));
         log.info("Rejected complaint {} by user {}", c.getId(), caller.userId());
     }
 

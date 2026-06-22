@@ -1,10 +1,13 @@
 package com.example.complaints.complaint.service;
 
+import org.springframework.context.ApplicationEventPublisher;
+
 import com.example.complaints.auth.model.UserRole;
 import com.example.complaints.auth.security.AuthenticatedStaff;
 import com.example.complaints.common.exception.BusinessException;
 import com.example.complaints.common.exception.ErrorCode;
 import com.example.complaints.complaint.dto.CloseComplaintRequest;
+import com.example.complaints.complaint.event.ComplaintClosedEvent;
 import com.example.complaints.complaint.model.Complaint;
 import com.example.complaints.complaint.model.ComplaintStatus;
 import com.example.complaints.complaint.repository.ComplaintHistoryRepository;
@@ -31,6 +34,7 @@ class ComplaintClosureServiceTest {
     private ComplaintRepository complaints;
     private ComplaintHistoryRepository history;
     private ComplaintScopeGuard scope;
+    private ApplicationEventPublisher events;
     private ComplaintClosureService service;
 
     private final AuthenticatedStaff engineer = new AuthenticatedStaff(
@@ -41,7 +45,8 @@ class ComplaintClosureServiceTest {
         complaints = mock(ComplaintRepository.class);
         history = mock(ComplaintHistoryRepository.class);
         scope = mock(ComplaintScopeGuard.class);
-        service = new ComplaintClosureService(complaints, history, scope);
+        events = mock(ApplicationEventPublisher.class);
+        service = new ComplaintClosureService(complaints, history, scope, events);
         doNothing().when(scope).requireInScope(any(), any());
     }
 
@@ -58,6 +63,7 @@ class ComplaintClosureServiceTest {
         assertThat(c.getClosedAt()).isNotNull();
         assertThat(c.isSlaBreached()).isFalse();
         verify(history).save(any());
+        verify(events).publishEvent(any(ComplaintClosedEvent.class));
     }
 
     @Test

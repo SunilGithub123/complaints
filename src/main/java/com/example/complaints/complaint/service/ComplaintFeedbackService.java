@@ -5,6 +5,7 @@ import com.example.complaints.common.exception.BusinessException;
 import com.example.complaints.common.exception.ErrorCode;
 import com.example.complaints.complaint.dto.FeedbackResponse;
 import com.example.complaints.complaint.dto.SubmitFeedbackRequest;
+import com.example.complaints.complaint.event.FeedbackSubmittedEvent;
 import com.example.complaints.complaint.mapper.ComplaintMapper;
 import com.example.complaints.complaint.model.Complaint;
 import com.example.complaints.complaint.model.ComplaintStatus;
@@ -13,6 +14,7 @@ import com.example.complaints.complaint.repository.ComplaintRepository;
 import com.example.complaints.complaint.repository.FeedbackRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -42,6 +44,8 @@ public class ComplaintFeedbackService {
     private final FeedbackRepository feedback;
     private final ComplaintMapper mapper;
 
+    private final ApplicationEventPublisher events;
+
     @Transactional
     public FeedbackResponse submit(VerifiedConsumer caller, String ticketNo, SubmitFeedbackRequest req) {
         Complaint c = complaints.findByTicketNo(ticketNo)
@@ -61,6 +65,11 @@ public class ComplaintFeedbackService {
                 .rating(req.rating())
                 .comment(nullIfBlank(req.comment()))
                 .build());
+
+        events.publishEvent(new FeedbackSubmittedEvent(
+                c.getId(), c.getTicketNo(), c.getAssignedTechnicianId(),
+                c.getAssignedEngineerId(), c.getDistributionCenterId(),
+                saved.getRating(), saved.getComment() != null));
 
         log.info("Consumer {} left feedback {}★ on complaint {}",
                 caller.consumerId(), saved.getRating(), c.getId());

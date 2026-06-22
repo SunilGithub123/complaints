@@ -8,6 +8,8 @@ import com.example.complaints.common.exception.BusinessException;
 import com.example.complaints.common.exception.ErrorCode;
 import com.example.complaints.complaint.dto.AssignComplaintRequest;
 import com.example.complaints.complaint.dto.ReassignComplaintRequest;
+import com.example.complaints.complaint.event.ComplaintAssignedEvent;
+import com.example.complaints.complaint.event.ComplaintReassignedEvent;
 import com.example.complaints.complaint.model.Complaint;
 import com.example.complaints.complaint.model.ComplaintHistory;
 import com.example.complaints.complaint.model.ComplaintStatus;
@@ -16,6 +18,7 @@ import com.example.complaints.complaint.repository.ComplaintHistoryRepository;
 import com.example.complaints.complaint.repository.ComplaintRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -51,6 +54,8 @@ public class ComplaintAssignmentService {
     private final ComplaintScopeGuard scope;
     private final StaffLookupService staff;
 
+    private final ApplicationEventPublisher events;
+
     @Transactional
     public void assign(AuthenticatedStaff caller, Long complaintId, AssignComplaintRequest req) {
         Complaint c = load(complaintId);
@@ -76,6 +81,9 @@ public class ComplaintAssignmentService {
 
         appendHistory(c.getId(), previous, ComplaintStatus.ASSIGNED, caller.userId(),
                 "Assigned to technician " + tech.userId() + " with severity " + req.severity());
+        events.publishEvent(new ComplaintAssignedEvent(
+                c.getId(), c.getTicketNo(), tech.userId(), engineerId,
+                c.getDistributionCenterId(), req.severity(), caller.userId()));
         log.info("Assigned complaint {} to technician {} (engineer {}) by user {}",
                 c.getId(), tech.userId(), engineerId, caller.userId());
     }
@@ -118,6 +126,10 @@ public class ComplaintAssignmentService {
                 + (previousDc.equals(tech.distributionCenterId()) ? "" : " (DC changed)")
                 + (req.reason() == null || req.reason().isBlank() ? "" : ": " + req.reason());
         appendHistory(c.getId(), c.getStatus(), c.getStatus(), caller.userId(), note);
+        events.publishEvent(new ComplaintReassignedEvent(
+                c.getId(), c.getTicketNo(), previousTech, tech.userId(),
+                previousDc, c.getDistributionCenterId(), c.getAssignedEngineerId(),
+                caller.userId(), req.reason()));
         log.info("Reassigned complaint {} from technician {} to {} by user {}",
                 c.getId(), previousTech, tech.userId(), caller.userId());
     }

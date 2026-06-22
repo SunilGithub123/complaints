@@ -6,6 +6,7 @@ import com.example.complaints.common.exception.ErrorCode;
 import com.example.complaints.complaint.dto.FeedbackResponse;
 import com.example.complaints.complaint.dto.SubmitFeedbackRequest;
 import com.example.complaints.complaint.mapper.ComplaintMapper;
+import com.example.complaints.complaint.event.FeedbackSubmittedEvent;
 import com.example.complaints.complaint.model.Complaint;
 import com.example.complaints.complaint.model.ComplaintStatus;
 import com.example.complaints.complaint.model.Feedback;
@@ -15,6 +16,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.context.ApplicationEventPublisher;
 
 import java.util.Optional;
 
@@ -30,6 +32,7 @@ class ComplaintFeedbackServiceTest {
     private ComplaintRepository complaints;
     private FeedbackRepository feedback;
     private ComplaintMapper mapper;
+    private ApplicationEventPublisher events;
     private ComplaintFeedbackService service;
 
     private final VerifiedConsumer caller =
@@ -40,7 +43,8 @@ class ComplaintFeedbackServiceTest {
         complaints = mock(ComplaintRepository.class);
         feedback = mock(FeedbackRepository.class);
         mapper = mock(ComplaintMapper.class);
-        service = new ComplaintFeedbackService(complaints, feedback, mapper);
+        events = mock(ApplicationEventPublisher.class);
+        service = new ComplaintFeedbackService(complaints, feedback, mapper, events);
     }
 
     @Test
@@ -68,6 +72,7 @@ class ComplaintFeedbackServiceTest {
         assertThat(saved.getRating()).isEqualTo(5);
         assertThat(saved.getComment()).isNull();     // blank-normalised
         assertThat(out.id()).isEqualTo(101L);
+        verify(events).publishEvent(any(FeedbackSubmittedEvent.class));
     }
 
     @Test

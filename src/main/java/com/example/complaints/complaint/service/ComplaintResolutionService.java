@@ -6,6 +6,7 @@ import com.example.complaints.common.exception.ErrorCode;
 import com.example.complaints.complaint.dto.ComplaintImageResponse;
 import com.example.complaints.complaint.dto.ResolveComplaintRequest;
 import com.example.complaints.complaint.mapper.ComplaintMapper;
+import com.example.complaints.complaint.event.ComplaintResolvedEvent;
 import com.example.complaints.complaint.model.Complaint;
 import com.example.complaints.complaint.model.ComplaintHistory;
 import com.example.complaints.complaint.model.ComplaintImage;
@@ -15,6 +16,7 @@ import com.example.complaints.complaint.repository.ComplaintHistoryRepository;
 import com.example.complaints.complaint.repository.ComplaintRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -46,6 +48,7 @@ public class ComplaintResolutionService {
     private final ComplaintHistoryRepository history;
     private final ComplaintImageService imageService;
     private final ComplaintMapper mapper;
+    private final ApplicationEventPublisher events;
 
     @Transactional
     public void start(AuthenticatedStaff caller, Long complaintId) {
@@ -80,6 +83,10 @@ public class ComplaintResolutionService {
         }
         appendHistory(c.getId(), previous, ComplaintStatus.RESOLVED, caller.userId(),
                 breached ? "Resolved (SLA breached): " + req.slaBreachReason() : "Resolved");
+        events.publishEvent(new ComplaintResolvedEvent(
+                c.getId(), c.getTicketNo(), c.getConsumerMasterId(),
+                c.getAssignedTechnicianId(), c.getAssignedEngineerId(),
+                c.isSlaBreached(), c.getResolvedAt(), caller.userId()));
         log.info("Technician {} resolved complaint {} (breached={})",
                 caller.userId(), c.getId(), breached);
     }

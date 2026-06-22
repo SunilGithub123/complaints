@@ -8,6 +8,8 @@ import com.example.complaints.common.exception.BusinessException;
 import com.example.complaints.common.exception.ErrorCode;
 import com.example.complaints.complaint.dto.AssignComplaintRequest;
 import com.example.complaints.complaint.dto.ReassignComplaintRequest;
+import com.example.complaints.complaint.event.ComplaintAssignedEvent;
+import com.example.complaints.complaint.event.ComplaintReassignedEvent;
 import com.example.complaints.complaint.model.Complaint;
 import com.example.complaints.complaint.model.ComplaintHistory;
 import com.example.complaints.complaint.model.ComplaintSeverity;
@@ -18,6 +20,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.context.ApplicationEventPublisher;
 
 import java.util.Optional;
 
@@ -42,6 +45,7 @@ class ComplaintAssignmentServiceTest {
     private ComplaintHistoryRepository history;
     private ComplaintScopeGuard scope;
     private StaffLookupService staff;
+    private ApplicationEventPublisher events;
     private ComplaintAssignmentService service;
 
     private final AuthenticatedStaff engineer = new AuthenticatedStaff(
@@ -55,7 +59,8 @@ class ComplaintAssignmentServiceTest {
         history = mock(ComplaintHistoryRepository.class);
         scope = mock(ComplaintScopeGuard.class);
         staff = mock(StaffLookupService.class);
-        service = new ComplaintAssignmentService(complaints, history, scope, staff);
+        events = mock(ApplicationEventPublisher.class);
+        service = new ComplaintAssignmentService(complaints, history, scope, staff, events);
         doNothing().when(scope).requireInScope(any(), any());
     }
 
@@ -77,6 +82,7 @@ class ComplaintAssignmentServiceTest {
         verify(history).save(h.capture());
         assertThat(h.getValue().getFromStatus()).isEqualTo(ComplaintStatus.SUBMITTED);
         assertThat(h.getValue().getToStatus()).isEqualTo(ComplaintStatus.ASSIGNED);
+        verify(events).publishEvent(any(ComplaintAssignedEvent.class));
     }
 
     @Test
@@ -112,6 +118,7 @@ class ComplaintAssignmentServiceTest {
         assertThat(c.getAssignedEngineerId()).isEqualTo(42L);
         assertThat(c.getStatus()).isEqualTo(ComplaintStatus.ASSIGNED); // unchanged
         verify(history).save(any());
+        verify(events).publishEvent(any(ComplaintReassignedEvent.class));
     }
 
     @Test

@@ -1,5 +1,6 @@
 package com.example.complaints.complaint.service;
 
+import com.example.complaints.complaint.event.SlaBreachedEvent;
 import com.example.complaints.complaint.model.Complaint;
 import com.example.complaints.complaint.model.ComplaintHistory;
 import com.example.complaints.complaint.model.ComplaintStatus;
@@ -9,6 +10,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.context.ApplicationEventPublisher;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -27,13 +29,15 @@ class SlaMonitorServiceTest {
 
     private ComplaintRepository complaints;
     private ComplaintHistoryRepository history;
+    private ApplicationEventPublisher events;
     private SlaMonitorService service;
 
     @BeforeEach
     void setUp() {
         complaints = mock(ComplaintRepository.class);
         history = mock(ComplaintHistoryRepository.class);
-        service = new SlaMonitorService(complaints, history);
+        events = mock(ApplicationEventPublisher.class);
+        service = new SlaMonitorService(complaints, history, events);
     }
 
     @Test
@@ -57,6 +61,7 @@ class SlaMonitorServiceTest {
             assertThat(h.getFromStatus()).isEqualTo(h.getToStatus());
             assertThat(h.getNote()).contains("SLA breached");
         });
+        verify(events, times(2)).publishEvent(any(SlaBreachedEvent.class));
     }
 
     @Test

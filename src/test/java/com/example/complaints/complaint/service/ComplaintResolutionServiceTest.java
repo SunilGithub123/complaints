@@ -1,11 +1,14 @@
 package com.example.complaints.complaint.service;
 
+import org.springframework.context.ApplicationEventPublisher;
+
 import com.example.complaints.auth.model.UserRole;
 import com.example.complaints.auth.security.AuthenticatedStaff;
 import com.example.complaints.common.exception.BusinessException;
 import com.example.complaints.common.exception.ErrorCode;
 import com.example.complaints.complaint.dto.ResolveComplaintRequest;
 import com.example.complaints.complaint.mapper.ComplaintMapper;
+import com.example.complaints.complaint.event.ComplaintResolvedEvent;
 import com.example.complaints.complaint.model.Complaint;
 import com.example.complaints.complaint.model.ComplaintStatus;
 import com.example.complaints.complaint.repository.ComplaintHistoryRepository;
@@ -34,6 +37,7 @@ class ComplaintResolutionServiceTest {
     private ComplaintHistoryRepository history;
     private ComplaintImageService imageService;
     private ComplaintMapper mapper;
+    private ApplicationEventPublisher events;
     private ComplaintResolutionService service;
 
     private final AuthenticatedStaff technician = new AuthenticatedStaff(
@@ -45,7 +49,8 @@ class ComplaintResolutionServiceTest {
         history = mock(ComplaintHistoryRepository.class);
         imageService = mock(ComplaintImageService.class);
         mapper = mock(ComplaintMapper.class);
-        service = new ComplaintResolutionService(complaints, history, imageService, mapper);
+        events = mock(ApplicationEventPublisher.class);
+        service = new ComplaintResolutionService(complaints, history, imageService, mapper, events);
     }
 
     @Test
@@ -85,6 +90,7 @@ class ComplaintResolutionServiceTest {
         assertThat(c.getResolutionNotes()).isEqualTo("Fixed loose wire");
         assertThat(c.isSlaBreached()).isFalse();
         assertThat(c.getResolvedAt()).isNotNull();
+        verify(events).publishEvent(any(ComplaintResolvedEvent.class));
     }
 
     @Test

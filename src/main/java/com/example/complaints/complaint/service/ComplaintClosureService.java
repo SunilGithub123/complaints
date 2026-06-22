@@ -4,6 +4,7 @@ import com.example.complaints.auth.security.AuthenticatedStaff;
 import com.example.complaints.common.exception.BusinessException;
 import com.example.complaints.common.exception.ErrorCode;
 import com.example.complaints.complaint.dto.CloseComplaintRequest;
+import com.example.complaints.complaint.event.ComplaintClosedEvent;
 import com.example.complaints.complaint.model.Complaint;
 import com.example.complaints.complaint.model.ComplaintHistory;
 import com.example.complaints.complaint.model.ComplaintStatus;
@@ -12,6 +13,7 @@ import com.example.complaints.complaint.repository.ComplaintHistoryRepository;
 import com.example.complaints.complaint.repository.ComplaintRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -34,6 +36,7 @@ public class ComplaintClosureService {
     private final ComplaintRepository complaints;
     private final ComplaintHistoryRepository history;
     private final ComplaintScopeGuard scope;
+    private final ApplicationEventPublisher events;
 
     @Transactional
     public void close(AuthenticatedStaff caller, Long complaintId, CloseComplaintRequest req) {
@@ -63,6 +66,10 @@ public class ComplaintClosureService {
         }
         appendHistory(c.getId(), previous, ComplaintStatus.CLOSED, caller.userId(),
                 breached ? "Closed (SLA breached)" : "Closed");
+        events.publishEvent(new ComplaintClosedEvent(
+                c.getId(), c.getTicketNo(), c.getConsumerMasterId(),
+                c.getAssignedTechnicianId(), c.getAssignedEngineerId(),
+                c.isSlaBreached(), c.getClosedAt(), caller.userId()));
         log.info("User {} closed complaint {} (breached={})", caller.userId(), c.getId(), breached);
     }
 

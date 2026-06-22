@@ -1,11 +1,13 @@
 package com.example.complaints.complaint.service;
 
+import com.example.complaints.complaint.event.SlaBreachedEvent;
 import com.example.complaints.complaint.model.Complaint;
 import com.example.complaints.complaint.model.ComplaintHistory;
 import com.example.complaints.complaint.repository.ComplaintHistoryRepository;
 import com.example.complaints.complaint.repository.ComplaintRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -49,6 +51,7 @@ public class SlaMonitorService {
 
     private final ComplaintRepository complaints;
     private final ComplaintHistoryRepository history;
+    private final ApplicationEventPublisher events;
 
     @Scheduled(cron = CRON, zone = "Asia/Kolkata")
     @Transactional
@@ -69,6 +72,10 @@ public class SlaMonitorService {
                     .changedByUserId(null) // system
                     .note("SLA breached")
                     .build());
+            events.publishEvent(new SlaBreachedEvent(
+                    c.getId(), c.getTicketNo(), c.getAssignedTechnicianId(),
+                    c.getAssignedEngineerId(), c.getDistributionCenterId(),
+                    c.getStatus(), c.getSlaDeadline(), now));
         }
         log.info("SLA sweep at {}: flagged {} complaints as breached", now, overdue.size());
     }

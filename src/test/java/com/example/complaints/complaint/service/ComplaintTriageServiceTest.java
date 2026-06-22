@@ -7,6 +7,7 @@ import com.example.complaints.common.exception.ErrorCode;
 import com.example.complaints.complaint.dto.MarkDuplicateRequest;
 import com.example.complaints.complaint.dto.RejectComplaintRequest;
 import com.example.complaints.complaint.dto.UpdateSeverityRequest;
+import com.example.complaints.complaint.event.ComplaintRejectedEvent;
 import com.example.complaints.complaint.model.Complaint;
 import com.example.complaints.complaint.model.ComplaintHistory;
 import com.example.complaints.complaint.model.ComplaintSeverity;
@@ -17,6 +18,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.context.ApplicationEventPublisher;
 
 import java.util.Optional;
 
@@ -37,6 +39,7 @@ class ComplaintTriageServiceTest {
     private ComplaintRepository complaints;
     private ComplaintHistoryRepository history;
     private ComplaintScopeGuard scope;
+    private ApplicationEventPublisher events;
     private ComplaintTriageService service;
 
     private final AuthenticatedStaff engineer = new AuthenticatedStaff(
@@ -47,7 +50,8 @@ class ComplaintTriageServiceTest {
         complaints = mock(ComplaintRepository.class);
         history = mock(ComplaintHistoryRepository.class);
         scope = mock(ComplaintScopeGuard.class);
-        service = new ComplaintTriageService(complaints, history, scope);
+        events = mock(ApplicationEventPublisher.class);
+        service = new ComplaintTriageService(complaints, history, scope, events);
         doNothing().when(scope).requireInScope(any(), any());
     }
 
@@ -90,6 +94,7 @@ class ComplaintTriageServiceTest {
         ArgumentCaptor<ComplaintHistory> h = ArgumentCaptor.forClass(ComplaintHistory.class);
         verify(history).save(h.capture());
         assertThat(h.getValue().getToStatus()).isEqualTo(ComplaintStatus.REJECTED);
+        verify(events).publishEvent(any(ComplaintRejectedEvent.class));
     }
 
     @Test
