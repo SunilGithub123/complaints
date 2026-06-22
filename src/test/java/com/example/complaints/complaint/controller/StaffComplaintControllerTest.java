@@ -4,9 +4,12 @@ import com.example.complaints.auth.model.UserRole;
 import com.example.complaints.auth.security.AuthenticatedStaff;
 import com.example.complaints.auth.security.JwtFactory;
 import com.example.complaints.complaint.dto.AssignComplaintRequest;
+import com.example.complaints.complaint.dto.ComplaintStaffDetailResponse;
 import com.example.complaints.complaint.dto.RejectComplaintRequest;
 import com.example.complaints.complaint.model.ComplaintSeverity;
+import com.example.complaints.complaint.model.ComplaintStatus;
 import com.example.complaints.complaint.service.ComplaintAssignmentService;
+import com.example.complaints.complaint.service.ComplaintStaffReadService;
 import com.example.complaints.complaint.service.ComplaintTriageService;
 import com.example.complaints.common.exception.GlobalExceptionHandler;
 import org.junit.jupiter.api.DisplayName;
@@ -24,8 +27,10 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 import static org.springframework.http.MediaType.APPLICATION_JSON;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -45,6 +50,7 @@ class StaffComplaintControllerTest {
 
     @MockitoBean ComplaintAssignmentService assignment;
     @MockitoBean ComplaintTriageService triage;
+    @MockitoBean ComplaintStaffReadService read;
     @MockitoBean JwtFactory jwtFactory;
 
     private RequestPostProcessor engineer() {
@@ -74,6 +80,23 @@ class StaffComplaintControllerTest {
                         .content(objectMapper.writeValueAsString(new RejectComplaintRequest(""))))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error.code").value("VALIDATION_FAILED"));
+    }
+
+    @Test
+    @DisplayName("GET {id}: returns staff detail envelope")
+    void getById_success() throws Exception {
+        ComplaintStaffDetailResponse stub = new ComplaintStaffDetailResponse(
+                7L, "MH20260600000007", 99L, "+919999999999", 3L, ComplaintSeverity.HIGH,
+                "desc", "loc", 10L, 1L, 2L, null, ComplaintStatus.ASSIGNED, false,
+                null, null, null, null, null, null, null, null, null, 1L, java.util.List.of());
+        when(read.getById(any(), eq(7L))).thenReturn(stub);
+
+        mockMvc.perform(get("/api/v1/staff/complaints/7").with(engineer()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.ticketNo").value("MH20260600000007"))
+                .andExpect(jsonPath("$.data.status").value("ASSIGNED"))
+                .andExpect(jsonPath("$.data.assignedTechnicianId").value(2));
     }
 }
 

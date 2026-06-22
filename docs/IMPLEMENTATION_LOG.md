@@ -1466,6 +1466,72 @@ docs/openapi.json — 33 → 38 paths (+5 staff complaint endpoints).
 
 ---
 
+### Stage 13.5 — Phase 4 Stage 2.5 · Staff complaint read (detail + history)
+
+**Refs:** TECHNICAL_DESIGN.md §5.4 · FE Stage 12 prerequisite.
+
+#### What shipped
+
+Two `GET` endpoints on the existing `StaffComplaintController` so the FE engineer/admin UI
+can render a complaint detail page and audit-trail timeline before any action modal is
+opened:
+
+- `GET /api/v1/staff/complaints/{id}` → `ComplaintStaffDetailResponse`
+- `GET /api/v1/staff/complaints/{id}/history` → `List<ComplaintHistoryEntryResponse>`
+
+New `ComplaintStaffReadService` mirrors the consumer-side `ComplaintReadService` but:
+- scope-checks via `ComplaintScopeGuard` (engineer DC / admin subdivision) instead of
+  consumer ownership;
+- returns a richer DTO that exposes technician/engineer IDs, severity, breach flag, all
+  reason/notes fields, `resolved_at`, `closed_at`, and the `@Version` value (so FE can echo
+  it back on subsequent mutating calls if optimistic-lock UX is added later);
+- history is its own endpoint to keep the detail payload bounded.
+
+Mapper gained `toStaffDetailResponse` and `toHistoryResponse`. The history mapper relies on
+`DateUtils.toIst` being null-safe — already verified.
+
+No new ErrorCodes, no schema changes, no security config changes (the existing
+`hasAnyRole("ENGINEER","ADMIN")` matcher on `/api/v1/staff/complaints/**` covers GETs too).
+
+#### Why a separate micro-stage rather than wait for Stage 16
+
+Stage 16 ships the paged list + Specification-based search. But the FE engineer/admin UI
+needs only the single-resource view to make Stage 13's five action endpoints usable — you
+can't click "Assign" without first seeing what you're assigning. Carving this out as a 30-min
+patch unblocks FE Stage 12 to run in parallel with BE Stage 14 instead of serially after it.
+
+#### Tests
+
+- `ComplaintStaffReadServiceTest` — 4 tests: getById happy, getById 404, getHistory happy,
+  getHistory blocked by scope guard.
+- `StaffComplaintControllerTest` — 1 new test (`getById_success`) on top of the existing
+  Stage 13 cases; the GET path goes through the same `@WebMvcTest` setup, no new slice needed.
+
+No IT — the read path is a single repo call + mapper; the existing `ComplaintCreationIT`
+already exercises the underlying schema for these fields.
+
+#### Build status
+
+```
+[INFO] Tests run: 92, Failures: 0, Errors: 0, Skipped: 0  (Surefire — unit; +5 from Stage 13: 4 service + 1 controller)
+[INFO] Tests run:  7, Failures: 0, Errors: 0, Skipped: 0  (Failsafe — IT;   unchanged)
+[INFO] BUILD SUCCESS
+docs/openapi.json — 38 → 40 paths (+2 GETs).
+```
+
+#### Carry-overs / known follow-ups
+
+- **Stage 14** — proceeds as planned (technician resolution + close-on-behalf + SLA-reason
+  rule + full-lifecycle IT). The new staff GETs will get exercised by that lifecycle IT.
+- **`@Version` on the wire** — FE doesn't have to send it back yet; Stage 13 mutation endpoints
+  don't read it from the request, only from the DB row. If we add an "edit screen with optimistic
+  concurrency UX" we'll add an `If-Match` header or a `version` body field at that point.
+- **Consumer detail vs staff detail divergence** — two DTOs now (`ComplaintDetailResponse` for
+  consumers, `ComplaintStaffDetailResponse` for staff). Deliberate — staff fields leak PII /
+  internal IDs we never want a consumer JWT to see. Keep them separate even if they grow.
+
+---
+
 ## How to update this log
 
 1. At the end of a stage, append (or fill in) the corresponding subsection.

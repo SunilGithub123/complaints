@@ -3,11 +3,14 @@ package com.example.complaints.complaint.controller;
 import com.example.complaints.auth.security.AuthenticatedStaff;
 import com.example.complaints.common.dto.ApiResponse;
 import com.example.complaints.complaint.dto.AssignComplaintRequest;
+import com.example.complaints.complaint.dto.ComplaintHistoryEntryResponse;
+import com.example.complaints.complaint.dto.ComplaintStaffDetailResponse;
 import com.example.complaints.complaint.dto.MarkDuplicateRequest;
 import com.example.complaints.complaint.dto.ReassignComplaintRequest;
 import com.example.complaints.complaint.dto.RejectComplaintRequest;
 import com.example.complaints.complaint.dto.UpdateSeverityRequest;
 import com.example.complaints.complaint.service.ComplaintAssignmentService;
+import com.example.complaints.complaint.service.ComplaintStaffReadService;
 import com.example.complaints.complaint.service.ComplaintTriageService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -15,11 +18,14 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.List;
 
 /**
  * Engineer / Admin complaint-management endpoints (Phase 4 Stage 13). See TECHNICAL_DESIGN.md §5.4.
@@ -41,6 +47,25 @@ public class StaffComplaintController {
 
     private final ComplaintAssignmentService assignment;
     private final ComplaintTriageService triage;
+    private final ComplaintStaffReadService read;
+
+    @GetMapping("/{id}")
+    @Operation(summary = "Engineer / Admin detail view of a complaint (scope-checked)")
+    public ResponseEntity<ApiResponse<ComplaintStaffDetailResponse>> getById(
+            @AuthenticationPrincipal AuthenticatedStaff caller,
+            @PathVariable Long id
+    ) {
+        return ResponseEntity.ok(ApiResponse.ok(read.getById(caller, id)));
+    }
+
+    @GetMapping("/{id}/history")
+    @Operation(summary = "Status-change audit trail for a complaint (chronological)")
+    public ResponseEntity<ApiResponse<List<ComplaintHistoryEntryResponse>>> getHistory(
+            @AuthenticationPrincipal AuthenticatedStaff caller,
+            @PathVariable Long id
+    ) {
+        return ResponseEntity.ok(ApiResponse.ok(read.getHistory(caller, id)));
+    }
 
     @PostMapping("/{id}/assign")
     @Operation(summary = "Assign a SUBMITTED complaint to a technician and set severity")

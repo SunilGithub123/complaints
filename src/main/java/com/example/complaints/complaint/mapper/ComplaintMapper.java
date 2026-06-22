@@ -2,9 +2,12 @@ package com.example.complaints.complaint.mapper;
 
 import com.example.complaints.common.util.DateUtils;
 import com.example.complaints.complaint.dto.ComplaintDetailResponse;
+import com.example.complaints.complaint.dto.ComplaintHistoryEntryResponse;
 import com.example.complaints.complaint.dto.ComplaintImageResponse;
+import com.example.complaints.complaint.dto.ComplaintStaffDetailResponse;
 import com.example.complaints.complaint.dto.SubmitComplaintResponse;
 import com.example.complaints.complaint.model.Complaint;
+import com.example.complaints.complaint.model.ComplaintHistory;
 import com.example.complaints.complaint.model.ComplaintImage;
 import com.example.complaints.storage.StorageService;
 import lombok.RequiredArgsConstructor;
@@ -59,6 +62,47 @@ public class ComplaintMapper {
                 img.getSizeBytes(),
                 storage.signedReadUrl(img.getStorageKey(), IMAGE_URL_TTL),
                 DateUtils.toIst(img.getCreatedAt())
+        );
+    }
+
+    public ComplaintStaffDetailResponse toStaffDetailResponse(Complaint c, List<ComplaintImage> images) {
+        return new ComplaintStaffDetailResponse(
+                c.getId(),
+                c.getTicketNo(),
+                c.getConsumerMasterId(),
+                c.getContactMobile(),
+                c.getCategoryId(),
+                c.getSeverity(),
+                c.getDescription(),
+                c.getLocation(),
+                c.getDistributionCenterId(),
+                c.getAssignedEngineerId(),
+                c.getAssignedTechnicianId(),
+                c.getParentComplaintId(),
+                c.getStatus(),
+                c.isSlaBreached(),
+                c.getResolutionNotes(),
+                c.getSlaBreachReason(),
+                c.getCancellationReason(),
+                c.getRejectionReason(),
+                DateUtils.toIst(c.getCreatedAt()),
+                DateUtils.toIst(c.getUpdatedAt()),
+                DateUtils.toIst(c.getSlaDeadline()),
+                DateUtils.toIst(c.getResolvedAt()),
+                DateUtils.toIst(c.getClosedAt()),
+                c.getVersion(),
+                images.stream().map(this::toImageResponse).toList()
+        );
+    }
+
+    public ComplaintHistoryEntryResponse toHistoryResponse(ComplaintHistory h) {
+        return new ComplaintHistoryEntryResponse(
+                h.getId(),
+                h.getFromStatus(),
+                h.getToStatus(),
+                h.getChangedByUserId(),
+                h.getNote(),
+                DateUtils.toIst(h.getChangedAt())
         );
     }
 }
