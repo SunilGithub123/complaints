@@ -72,6 +72,10 @@ app:
     max-per-mobile-per-hour: 5
     cooldown-seconds: 30
     max-attempts: 5
+  sms:
+    # OTP delivery provider. `console` = ConsoleSmsService (dev default; prints to stdout).
+    # Override to `msg91` once the MSG91 adapter ships (Phase 3 follow-up).
+    provider: console
   bootstrap-admin:
     employee-id: ${BOOTSTRAP_ADMIN_EMPLOYEE_ID:}
     password: ${BOOTSTRAP_ADMIN_PASSWORD:}

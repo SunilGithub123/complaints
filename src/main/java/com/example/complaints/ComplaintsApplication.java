@@ -3,6 +3,7 @@ package com.example.complaints;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 import java.util.TimeZone;
 
@@ -12,9 +13,11 @@ import java.util.TimeZone;
  * already see IST. See TECHNICAL_DESIGN.md §16.1.
  */
 @SpringBootApplication
+@EnableScheduling
 @ConfigurationPropertiesScan(basePackages = {
         "com.example.complaints.config",
-        "com.example.complaints.auth.security"
+        "com.example.complaints.auth.security",
+        "com.example.complaints.auth.service"
 })
 public class ComplaintsApplication {
 

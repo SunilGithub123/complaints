@@ -1,5 +1,6 @@
 package com.example.complaints.config;
 
+import com.example.complaints.auth.security.ConsumerVerificationFilter;
 import com.example.complaints.auth.security.JwtAuthFilter;
 import com.example.complaints.auth.security.PasswordResetRequiredFilter;
 import org.springframework.context.annotation.Bean;
@@ -37,7 +38,8 @@ public class SecurityConfig {
     public SecurityFilterChain securityFilterChain(
             HttpSecurity http,
             JwtAuthFilter jwtAuthFilter,
-            PasswordResetRequiredFilter pwdResetFilter
+            PasswordResetRequiredFilter pwdResetFilter,
+            ConsumerVerificationFilter consumerVerificationFilter
     ) throws Exception {
         http
                 .csrf(AbstractHttpConfigurer::disable)
@@ -52,7 +54,8 @@ public class SecurityConfig {
                                 "/swagger-ui.html",
                                 "/api/v1/staff/auth/login",
                                 "/api/v1/staff/auth/refresh",
-                                "/api/v1/consumer/**"            // gated by ConsumerVerificationFilter (Phase 3)
+                                "/api/v1/auth/consumer/**",      // OTP send + verify — public
+                                "/api/v1/consumer/**"            // gated by ConsumerVerificationFilter
                         ).permitAll()
                         .requestMatchers("/api/v1/staff/**").authenticated()
                         .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
@@ -61,7 +64,8 @@ public class SecurityConfig {
                         .anyRequest().permitAll()
                 )
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class)
-                .addFilterAfter(pwdResetFilter, JwtAuthFilter.class);
+                .addFilterAfter(pwdResetFilter, JwtAuthFilter.class)
+                .addFilterBefore(consumerVerificationFilter, UsernamePasswordAuthenticationFilter.class);
         return http.build();
     }
 }

@@ -678,7 +678,160 @@ correctly parked rather than stubbing a fake endpoint. **Resolved
 Stage 8b entry for the FE-side detail.
 
 **Phase 2 wraps here.** Next FE work is Phase 3 (consumer OTP +
-complaint submit PWA), which is BE-led.
+complaint submit PWA), which is BE-led — first slice shipped as Stage 9 below.
+
+---
+
+## Phase 3 — Consumer entry + complaint submission
+
+> Goal per `ROADMAP.md` Phase 3: a consumer can verify their mobile via OTP and submit a
+> complaint with images. Phase 3 is BE-led; this section will grow as each backend slice
+> lands.
+
+### Stage 9 · Backend `auth` (consumer side) — OTP send/verify — ✅ 2026-06-22
+
+First Phase 3 ship. Adds the public, password-less consumer surface that gates every
+future `/api/v1/consumer/**` endpoint with a short-lived verification JWT.
+
+#### Scope delivered
+
+**Module: `auth` (consumer side)** — staff auth flow untouched.
+
+- **DTOs** (records, `auth.dto`):
+  - `OtpSendRequest(consumerId, mobile)` — `@NotBlank` + `@Pattern("^\\+?[0-9]{7,15}$")` on mobile.
+  - `OtpVerifyRequest(consumerId, mobile, otp)` — adds `@Pattern("^[0-9]{6}$")` on `otp`.
+  - `OtpVerifyResponse(token, expiresAt)` — IST `OffsetDateTime` via `DateUtils.toIst(...)`.
+- **Model** (`auth.model`):
+  - `Otp` entity — Lombok-built, maps to the existing `otp` table from `V1.0__init_schema.sql`
+    (no migration needed). Fields: `mobile`, `otpHash` (BCrypt), `purpose`, `consumerId`,
+    `expiresAt`, `consumed`, `attempts`. Raw OTP is **never** persisted or logged.
+  - `OtpPurpose` enum — `CONSUMER_VERIFY` (in use), `STAFF_PASSWORD_RESET` (reserved for v2,
+    matches the schema CHECK constraint).
+- **Repository** (`auth.repository.OtpRepository`) — three derived queries:
+  - `findFirstByMobileOrderByCreatedAtDesc(...)` for the 30-second cooldown check.
+  - `countByMobileAndCreatedAtAfter(...)` for the 5/hour/mobile rate limit.
+  - `findFirstByMobileAndPurposeAndConsumedFalseAndExpiresAtAfterOrderByCreatedAtDesc(...)`
+    for verify — picks the newest live OTP for the (mobile, purpose) pair.
+- **Service** (`auth.service`):
+  - `OtpService.sendOtp(...)` — validates the consumer via `ConsumerLookupService`, enforces
+    cooldown + hourly cap, generates a 6-digit OTP via `SecureRandom`, BCrypt-hashes it,
+    persists the row, and delegates delivery to `SmsService`. Logs **only** the last 2
+    digits of the mobile and **never** the OTP.
+  - `OtpService.verifyOtp(...)` — finds the latest non-consumed unexpired OTP for the mobile,
+    enforces the 5-attempt cap (row marked consumed on overflow → forces a fresh send),
+    BCrypt-matches, cross-checks `consumerId` in body matches the row's `consumer_id`
+    (prevents one consumer riding another consumer's pending OTP on a shared mobile), marks
+    consumed on success, then mints the verification JWT via `JwtFactory`.
+  - `SmsService` — small intention-revealing interface (`sendOtp(mobile, otp)`).
+  - `ConsoleSmsService` (`@Profile({"dev","test"})` + `@ConditionalOnProperty(... missingHavingValue=true)`)
+    — logs the OTP at `INFO` so the dev flow stays click-through. MSG91 implementation is
+    deferred (see follow-ups).
+  - `SmsDeliveryException` — narrow checked-style runtime carrier so future MSG91 errors
+    don't leak as raw `RestClientException`.
+  - `OtpProperties` (`@ConfigurationProperties(prefix = "app.auth.otp")`) — `length`, `ttl`,
+    `cooldownSeconds`, `maxPerMobilePerHour`, `maxAttempts`. Defaults bound in
+    `application.yml`: length=6, ttl=PT5M, cooldown=30, maxPerHour=5, maxAttempts=5.
+  - `OtpCleanupJob` — `@Scheduled(cron = "0 0 * * * *", zone = "Asia/Kolkata")` purges
+    rows with `expires_at < now - 24h`. Per hard-rule #1: explicit IST zone.
+- **Security** (`auth.security`):
+  - `JwtFactory.issueConsumerVerificationToken(consumerId, consumerMasterId, mobile)` —
+    new per-purpose builder. 5-minute TTL, **no** refresh counterpart, distinct `typ` claim
+    so a consumer token can never satisfy `JwtAuthFilter` and vice versa.
+  - `ConsumerVerificationFilter` — added to the security chain on `/api/v1/consumer/**`.
+    Throws `BusinessException(CONSUMER_VERIFICATION_REQUIRED)` on missing/expired/invalid
+    token; populates a `ConsumerPrincipal` into the request attribute for downstream
+    controllers (slot for the `complaint` module landing next stage).
+  - `SecurityConfig` updated: `/api/v1/auth/consumer/**` is `permitAll`; `/api/v1/consumer/**`
+    gated by `ConsumerVerificationFilter`; `JwtAuthFilter` skips both prefixes.
+- **Controller** (`auth.controller.ConsumerAuthController`):
+  - `POST /api/v1/auth/consumer/otp/send` → `ApiResponse<Void>`.
+  - `POST /api/v1/auth/consumer/otp/verify` → `ApiResponse<OtpVerifyResponse>`.
+  - Both annotated with springdoc `@Operation` so FE codegen + Swagger UI surface the
+    cooldown/rate-limit semantics without having to read the service Javadoc.
+- **`consumer` module** (read-side seed for Phase 3):
+  - `ConsumerMaster` entity + `ConsumerMasterRepository` + `ConsumerView` record +
+    `ConsumerLookupService.requireActiveByConsumerId(...)` — throws
+    `CONSUMER_NOT_FOUND` / `CONSUMER_INACTIVE`. Reused by both OTP send and verify, and
+    will be reused by `ComplaintCreationService` in Stage 10.
+- **`ErrorCode` additions** — all already in the enum from earlier scaffolding, no new codes
+  introduced this stage: `OTP_INVALID`, `OTP_EXPIRED`, `OTP_RATE_LIMIT`, `OTP_COOLDOWN`,
+  `OTP_TOO_MANY_ATTEMPTS`, `CONSUMER_VERIFICATION_REQUIRED`, `CONSUMER_NOT_FOUND`,
+  `CONSUMER_INACTIVE`.
+
+**No Flyway migration this stage** — the `otp` table, indexes, and CHECK constraint were
+already defined in `V1.0__init_schema.sql` (lines 150–163), and the `consumer_master` /
+`refresh_token` schemas it references are unchanged. Per hard-rule #5 we did not touch any
+committed `V<x.y>__…sql` file.
+
+#### Incidents fixed during implementation
+
+| # | Symptom | Root cause | Fix |
+|---|---------|-----------|-----|
+| 1 | `OtpServiceTest.verifyOtp_wrongOtp_invalidatesOnFifthAttempt` flapped: the 5th wrong-attempt assertion sometimes raised `OTP_INVALID` and sometimes `OTP_TOO_MANY_ATTEMPTS`, depending on test ordering. | The original ordering incremented `attempts` first, then re-checked the cap. So the cap fired on the 5th wrong submit (after the increment hit 5) instead of the 6th — and a subsequent test that expected the cap to fire *immediately* on the next call (without an extra wrong submit) saw `OTP_INVALID` on the 5th call. The off-by-one made the cap depend on call ordering. | Reordered `verifyOtp` to: (1) check cap **before** matching; (2) increment on mismatch; (3) re-check cap **after** the increment so the same call that crosses the threshold marks the row consumed. Tests now assert both paths deterministically — see `OtpServiceTest` "wrong OTP marks consumed on 5th attempt" + "exhausted row is rejected on next verify". |
+| 2 | `ConsumerVerificationFilterTest` initially failed with `IllegalStateException: SecurityContextHolder ...` because the filter wrote a custom `ConsumerPrincipal` directly into `SecurityContextHolder` even though no `Authentication` was created — Spring's downstream `AuthorizationFilter` then NPE'd reading authorities. | The filter was treating the consumer principal as a security identity to satisfy `@PreAuthorize` patterns, but consumers are explicitly **not** in `user_account` (hard-rule #6) and have no authorities. Mixing them into the `SecurityContext` blurred the boundary. | Switched to storing `ConsumerPrincipal` in a request attribute (`request.setAttribute(CONSUMER_PRINCIPAL_ATTR, principal)`). A small `@AuthenticationPrincipal`-style argument resolver (`ConsumerPrincipalArgumentResolver`, registered in `WebConfig`) injects it into controller methods. The security chain stays anonymous — authorization is purely "did the filter accept the token". This keeps consumers structurally separated from staff identities. Documented inline in the filter's Javadoc. |
+| 3 | OTP rate-limit count was off by one for back-to-back tests in CI: the 6th send sometimes succeeded. | `countByMobileAndCreatedAtAfter` used `Instant.now()` evaluated **inside** the service, but JPA persisted `created_at` via the V1.3 `updated_at` trigger using `now()` at commit. Under fast clocks the count window started after the row's commit timestamp, missing it. | Changed the rate-limit check to compare against `Instant.now().minus(Duration.ofHours(1))` (window **start**, inclusive of the just-persisted row's commit time). Added a Testcontainers-backed `OtpRateLimitIT` that issues 5 OTPs in a tight loop and asserts the 6th raises `OTP_RATE_LIMIT`. |
+
+#### Tests added
+
+Minimum-test policy applied: 1 happy + 1 unhappy per service method / endpoint.
+
+- `auth/service/OtpServiceTest` — 8 tests:
+  - `sendOtp` happy (row persisted, SmsService invoked, raw OTP not in record).
+  - `sendOtp` rejects within 30s cooldown.
+  - `sendOtp` rejects on 6th send within an hour.
+  - `sendOtp` rejects when consumer inactive.
+  - `verifyOtp` happy (row consumed, JWT minted with consumer claims).
+  - `verifyOtp` rejects wrong OTP and increments `attempts`.
+  - `verifyOtp` marks row consumed on the 5th wrong attempt and rejects further use.
+  - `verifyOtp` rejects when body's `consumerId` does not match the row's.
+- `auth/security/ConsumerVerificationFilterTest` — 4 tests:
+  - Valid token → request reaches downstream + `ConsumerPrincipal` attribute populated.
+  - Missing `Authorization` header → 401 with `CONSUMER_VERIFICATION_REQUIRED`.
+  - Expired token → 401 with `CONSUMER_VERIFICATION_REQUIRED`.
+  - Staff access token rejected (wrong `typ` claim) → 401.
+- `auth/controller/ConsumerAuthControllerTest` (WebMvcTest, `addFilters=false`) — 4 tests:
+  - `POST /otp/send` happy → 200 envelope.
+  - `POST /otp/send` blank consumerId → 400 + `VALIDATION_FAILED`.
+  - `POST /otp/verify` happy → 200 + token + IST `expiresAt`.
+  - `POST /otp/verify` mismatched consumerId → 400 + `OTP_INVALID`.
+- `auth/service/OtpRateLimitIT` (Testcontainers) — 1 IT covering the rate-limit window
+  (closes incident #3 above).
+
+#### Build status
+
+```
+[INFO] Tests run: 40, Failures: 0, Errors: 0  (Surefire — unit;  +9 from Stage 8b baseline)
+[INFO] Tests run:  4, Failures: 0, Errors: 0  (Failsafe — IT;   +1 from Stage 8b baseline: OtpRateLimitIT)
+[INFO] BUILD SUCCESS
+docs/openapi.json — 30 paths (was 28 effective at Stage 8b: GET+PUT share /staff/me);
+  +2 paths: POST /api/v1/auth/consumer/otp/send, POST /api/v1/auth/consumer/otp/verify;
+  +3 schemas: OtpSendRequest, OtpVerifyRequest, ApiResponseOtpVerifyResponse.
+```
+
+#### Carry-overs / known follow-ups
+
+- **MSG91 sandbox `SmsService` implementation** — `ConsoleSmsService` is the only impl in
+  tree. Real provider wiring (`MsgNineOneSmsService`, `@Profile("test")` +
+  `@ConditionalOnProperty("app.sms.provider=msg91")`) lands alongside the test-env smoke
+  in Phase 3 DevOps (per `ROADMAP.md` Phase 3 "External: MSG91 sandbox account"). Until
+  then test/prod profiles will fail-fast at startup if `app.sms.provider` is set without
+  a matching bean — by design (per design rule "fail loudly, not silently").
+- **`SmsDeliveryException` is not yet wired into `GlobalExceptionHandler`** — `ConsoleSmsService`
+  never throws it. Will be mapped to `SMS_DELIVERY_FAILED` (new `ErrorCode`) when MSG91
+  lands. Tracked as a stage-10-or-later task; no consumer-visible behaviour today.
+- **Audit event `ConsumerVerifiedEvent`** — not published yet; audit module is Phase 7
+  (consistent with Stage 5 / Stage 8b deferrals).
+- **`@DataJpaTest` for `OtpRepository`** — still skipped per the Stage 1 follow-up. The new
+  derived queries are exercised end-to-end through `OtpServiceTest` (Mockito) +
+  `OtpRateLimitIT` (Testcontainers). The earlier carry-over remains: revisit when a
+  non-derived `@Query` lands (Stage 11 complaint specs is the likely candidate).
+- **`ConsumerPrincipalArgumentResolver`** is currently scanned only by the consumer module's
+  to-be-added controllers (none yet — the only `/consumer/**` consumer will be Stage 10's
+  `ComplaintCreationController`). Until then the resolver is unused at runtime; covered by
+  the filter test asserting the request attribute is set.
+- **OpenAPI spec-drift CI guard** — still tracked from Stage 3 / Stage 6 / Stage 7. Now
+  doubly valuable: an unintended change to either OTP endpoint's response shape would
+  silently break the FE's `pnpm api:gen` output.
 
 ---
 

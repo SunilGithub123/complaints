@@ -39,6 +39,7 @@ public class JwtFactory {
     public static final String CLAIM_DC_ID             = "dc_id";
     public static final String CLAIM_PASSWORD_RESET    = "prr";
     public static final String CLAIM_CONSUMER_MOBILE   = "mob";
+    public static final String CLAIM_CONSUMER_MASTER_ID = "cmid";
 
     public static final String TYPE_ACCESS   = "access";
     public static final String TYPE_REFRESH  = "refresh";
@@ -78,10 +79,11 @@ public class JwtFactory {
         return build(String.valueOf(user.getId()), claims, props.refreshTokenTtl(), UUID.randomUUID().toString());
     }
 
-    public IssuedToken issueConsumerVerificationToken(String consumerId, String mobile) {
+    public IssuedToken issueConsumerVerificationToken(String consumerId, Long consumerMasterId, String mobile) {
         Map<String, Object> claims = new HashMap<>();
         claims.put(CLAIM_TYPE, TYPE_CONSUMER);
         claims.put(CLAIM_CONSUMER_MOBILE, mobile);
+        claims.put(CLAIM_CONSUMER_MASTER_ID, consumerMasterId);
         return build(consumerId, claims, props.consumerVerificationTtl(), null);
     }
 
