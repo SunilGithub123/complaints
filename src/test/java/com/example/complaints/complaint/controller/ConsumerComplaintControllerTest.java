@@ -9,8 +9,10 @@ import com.example.complaints.common.exception.GlobalExceptionHandler;
 import com.example.complaints.complaint.dto.ComplaintDetailResponse;
 import com.example.complaints.complaint.dto.ConsumerComplaintHistoryEntryResponse;
 import com.example.complaints.complaint.dto.ConsumerComplaintListItemResponse;
+import com.example.complaints.complaint.dto.CancelComplaintRequest;
 import com.example.complaints.complaint.dto.SubmitComplaintResponse;
 import com.example.complaints.complaint.model.ComplaintStatus;
+import com.example.complaints.complaint.service.ComplaintCancellationService;
 import com.example.complaints.complaint.service.ComplaintCreationService;
 import com.example.complaints.complaint.service.ComplaintReadService;
 import org.junit.jupiter.api.AfterEach;
@@ -34,11 +36,15 @@ import java.util.List;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.http.MediaType.APPLICATION_JSON;
 import static org.springframework.http.MediaType.MULTIPART_FORM_DATA;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -50,6 +56,7 @@ class ConsumerComplaintControllerTest {
     @Autowired MockMvc mockMvc;
     @MockitoBean ComplaintCreationService creation;
     @MockitoBean ComplaintReadService read;
+    @MockitoBean ComplaintCancellationService cancellation;
     // ConsumerVerificationFilter is bean-injected by the slice even when addFilters=false.
     @MockitoBean JwtFactory jwtFactory;
 
@@ -169,6 +176,33 @@ class ConsumerComplaintControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data[0].toStatus").value("ASSIGNED"))
                 .andExpect(jsonPath("$.data[0].changedByUserId").doesNotExist());
+    }
+
+    @Test
+    @DisplayName("POST /complaints/{ticketNo}/cancel — happy path delegates and returns success envelope")
+    void cancel_happy_200() throws Exception {
+        doNothing().when(cancellation).cancel(any(), eq("MH20260600000123"), any(CancelComplaintRequest.class));
+
+        mockMvc.perform(post("/api/v1/consumer/complaints/{t}/cancel", "MH20260600000123")
+                        .contentType(APPLICATION_JSON)
+                        .content("{\"reason\":\"Issue self-resolved\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true));
+
+        verify(cancellation).cancel(any(), eq("MH20260600000123"), any(CancelComplaintRequest.class));
+    }
+
+    @Test
+    @DisplayName("POST /complaints/{ticketNo}/cancel — non-SUBMITTED state → 409 COMPLAINT_NOT_IN_SUBMITTED_STATE")
+    void cancel_wrongState_409() throws Exception {
+        doThrow(new BusinessException(ErrorCode.COMPLAINT_NOT_IN_SUBMITTED_STATE))
+                .when(cancellation).cancel(any(), anyString(), any(CancelComplaintRequest.class));
+
+        mockMvc.perform(post("/api/v1/consumer/complaints/{t}/cancel", "MH20260600000999")
+                        .contentType(APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.code").value("COMPLAINT_NOT_IN_SUBMITTED_STATE"));
     }
 }
 

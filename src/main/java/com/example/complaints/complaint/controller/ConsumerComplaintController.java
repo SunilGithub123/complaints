@@ -3,12 +3,14 @@ package com.example.complaints.complaint.controller;
 import com.example.complaints.auth.security.VerifiedConsumer;
 import com.example.complaints.common.dto.ApiResponse;
 import com.example.complaints.common.dto.PageResponse;
+import com.example.complaints.complaint.dto.CancelComplaintRequest;
 import com.example.complaints.complaint.dto.ComplaintDetailResponse;
 import com.example.complaints.complaint.dto.ConsumerComplaintHistoryEntryResponse;
 import com.example.complaints.complaint.dto.ConsumerComplaintListItemResponse;
 import com.example.complaints.complaint.dto.SubmitComplaintRequest;
 import com.example.complaints.complaint.dto.SubmitComplaintResponse;
 import com.example.complaints.complaint.model.ComplaintStatus;
+import com.example.complaints.complaint.service.ComplaintCancellationService;
 import com.example.complaints.complaint.service.ComplaintCreationService;
 import com.example.complaints.complaint.service.ComplaintReadService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -60,6 +62,7 @@ public class ConsumerComplaintController {
 
     private final ComplaintCreationService creation;
     private final ComplaintReadService read;
+    private final ComplaintCancellationService cancellation;
 
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @Operation(
@@ -124,6 +127,23 @@ public class ConsumerComplaintController {
             @PathVariable String ticketNo
     ) {
         return ResponseEntity.ok(ApiResponse.ok(read.getOwnedHistory(caller, ticketNo)));
+    }
+
+    @PostMapping("/{ticketNo}/cancel")
+    @Operation(
+            summary = "Cancel an owned complaint (only while status = SUBMITTED)",
+            description = "Consumer-driven withdrawal. Once an engineer has assigned the "
+                    + "complaint, MSEB owns the workflow and the consumer can no longer cancel "
+                    + "— that's a 409 COMPLAINT_NOT_IN_SUBMITTED_STATE. Body carries an optional "
+                    + "free-text reason."
+    )
+    public ResponseEntity<ApiResponse<Void>> cancel(
+            @AuthenticationPrincipal VerifiedConsumer caller,
+            @PathVariable String ticketNo,
+            @Valid @org.springframework.web.bind.annotation.RequestBody CancelComplaintRequest req
+    ) {
+        cancellation.cancel(caller, ticketNo, req);
+        return ResponseEntity.ok(ApiResponse.ok(null));
     }
 
     /**

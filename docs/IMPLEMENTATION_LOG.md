@@ -2245,6 +2245,77 @@ The old happy / unhappy paths still cover the single-ticket detail flow.
 
 ---
 
+### Stage 18 — Consumer cancellation
+
+Adds the one mutation the consumer is allowed to make on a complaint after submit: withdrawing
+it while it's still `SUBMITTED`. Reuses the state-machine allow-table added in Stage 12; no
+schema change (`cancellation_reason` column has existed since V1.0).
+
+#### Scope delivered
+
+- **`POST /api/v1/consumer/complaints/{ticketNo}/cancel`** — body `{ reason?: string }`
+  (optional, max 500 chars). Owner-checked. State-checked (must be `SUBMITTED`). Persists
+  `cancellation_reason` if present, writes a history row, returns `ApiResponse<Void>`.
+- **New service `ComplaintCancellationService`** — single-purpose, mirrors the Phase 4
+  service style (assignment / triage / resolution / closure each have their own service).
+- **New DTO `CancelComplaintRequest`** with `@Size(max = 500)` on the optional reason.
+
+#### Design decisions
+
+- **Owner check before state check.** If a non-owner sends `POST /cancel` against a foreign
+  ticket they get `403 COMPLAINT_NOT_OWNED_BY_CONSUMER`, not `409 NOT_IN_SUBMITTED_STATE`.
+  Same privacy posture as the read path — we don't want callers to enumerate ticket states
+  by probing.
+- **Narrow `COMPLAINT_NOT_IN_SUBMITTED_STATE` rather than generic `INVALID_STATE_TRANSITION`.**
+  The consumer UX wants to tell the user "this can only be cancelled before MSEB starts work
+  on it", not generic 409 noise. We still call `ComplaintStatusTransition.requireValid(...)`
+  afterwards as a belt-and-braces check, but the user-facing code is the narrow one.
+- **History `changed_by_user_id = null`, consumer external ID embedded in `note`.** Consumers
+  have no `user_account` row, so the FK slot stays null — exactly the same pattern the SLA
+  scheduler uses for system actors (Stage 15). Audit reconstruction reads e.g.
+  `"Cancelled by consumer MH00010001"` from the `note` column. Staff history endpoint will
+  surface this verbatim; consumer history endpoint shows the same `note` (no PII — only the
+  consumer's own external id, which they already know).
+- **`reason` normalised to `null` if blank.** Empty / whitespace-only reasons land as
+  `NULL` in `cancellation_reason` rather than empty strings — keeps the staff detail screen's
+  "show reason if present" check simple.
+- **No `@CacheEvict` / no domain event** — the complaint list / detail queries aren't cached
+  in v1, and the notification module isn't wired yet (Phase 6). When events land, this is
+  the natural first publisher (`ComplaintCancelledEvent`).
+
+#### Tests added (5)
+
+- `ComplaintCancellationServiceTest`:
+  - `cancel_happyPath` — verifies state flip, reason persisted, history row with null actor
+    and consumer external id in the note.
+  - `cancel_assigned_rejected` — non-`SUBMITTED` raises `COMPLAINT_NOT_IN_SUBMITTED_STATE`.
+  - `cancel_foreignTicket_rejected` — foreign ownership raises `COMPLAINT_NOT_OWNED_BY_CONSUMER`
+    even when state would otherwise be valid (state-leak guard).
+- `ConsumerComplaintControllerTest`:
+  - `cancel_happy_200` — MockMvc: delegates to service, returns success envelope.
+  - `cancel_wrongState_409` — service throws → controller surfaces as 409 with the right code.
+
+#### Incidents fixed during implementation
+
+- **None of note.** The IDE-cache import drift recurred again on three separate edits
+  (controller import + field, test imports). Caught by `./mvnw` each time and re-applied;
+  total cost ~3 minutes. The symptom is consistent enough now that it's quick to recognise
+  ("cannot find symbol" immediately after a clean replace = re-grep imports before retrying).
+  Considering a one-off "verify file contents after edit via grep" habit going forward.
+
+#### Build status
+
+- `./mvnw verify` green.
+- **136 unit + 8 IT**, OpenAPI **50 paths** (was 49; +1 cancel endpoint).
+
+#### Carry-overs / known follow-ups
+
+- **Stage 19 (feedback)** — next slice. `POST /api/v1/consumer/complaints/{ticketNo}/feedback`,
+  `{ rating: 1..5, comments? }`, `CLOSED`-only, idempotent (one row per complaint).
+  `Feedback` entity exists from Stage 10b schema; `FEEDBACK_*` error codes already in enum.
+
+---
+
 ## How to update this log
 
 1. At the end of a stage, append (or fill in) the corresponding subsection.
