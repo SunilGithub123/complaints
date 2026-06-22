@@ -1232,6 +1232,108 @@ docs/openapi.json — unchanged at 33 paths (FE-led stage, no BE controller chan
 
 ---
 
+## Phase 4 — Triage, assignment, and technician resolution
+
+> Goal per `ROADMAP.md` Phase 4: full complaint lifecycle works — engineer assigns to technician,
+> technician resolves and closes. Largest phase by code volume; split into 5 stages so each
+> ships green independently.
+>
+> Plan: **Stage 12** state machine + optimistic lock (foundation) → **Stage 13** assignment + triage →
+> **Stage 14** technician resolution + closure → **Stage 15** SLA breach scheduler →
+> **Stage 16** complaint search (Specifications). Stages 13–16 all depend on the validator +
+> `@Version` from Stage 12.
+
+### Stage 12 · State machine + optimistic lock — ✅ 2026-06-22
+
+> Foundation slice — no HTTP endpoints, no OpenAPI delta. Pins the lifecycle rules in one
+> place and turns concurrent updates into a clean 409 instead of silent overwrites. Every
+> subsequent Phase-4 service consults `ComplaintStatusTransition.requireValid(...)` and
+> mutates `Complaint` rows under the new `@Version` guard.
+
+#### Scope delivered
+
+- **Flyway migration** `V1.4__add_complaint_version.sql` — adds `version BIGINT NOT NULL DEFAULT 0`
+  to `complaint`. Hard-rule #5 honoured (new file, not an edit of any committed V1.x).
+- **`Complaint.version`** — `@Version private long version` with explicit Javadoc noting the
+  distinction from the time-based `updated_at` column (which is DB-managed, monotonic in time
+  but not in update count).
+- **`complaint.model.ComplaintStatusTransition`** — final class with private constructor,
+  holds the single allow-table:
+  - `SUBMITTED   → ASSIGNED, CANCELLED, REJECTED, DUPLICATE`
+  - `ASSIGNED    → IN_PROGRESS`
+  - `IN_PROGRESS → RESOLVED`
+  - `RESOLVED    → CLOSED`
+  - `CLOSED, CANCELLED, REJECTED, DUPLICATE → ∅` (terminal)
+  - Three static methods: `isAllowed(from, to)`, `requireValid(from, to)` (throws
+    `COMPLAINT_INVALID_STATE_TRANSITION`), `isTerminal(status)` (UI badge convenience).
+  - `null from` is the initial-insert path; only valid against `SUBMITTED`.
+  - **Reassignment, severity edits, audit notes** keep `status` unchanged and so do **not**
+    consult this validator — the validator gates *state* transitions only. Documented inline
+    so the next service author doesn't mis-classify reassign as a "transition".
+- **`GlobalExceptionHandler` mapping** — `ObjectOptimisticLockingFailureException` →
+  `COMPLAINT_VERSION_CONFLICT` (409). The `ErrorCode` was reserved in Stage 1 and finally has
+  a wired source.
+
+**Status transition decisions (v1, deliberately conservative):**
+- No rollback edges (no `RESOLVED → IN_PROGRESS`, no `CLOSED → RE_OPENED`).
+- No same-state edges (reassignment ≠ transition; severity edits ≠ transition).
+- No cross-terminal recovery (`REJECTED → SUBMITTED` etc.).
+- If BRD revisions add edges, do it here in one diff rather than spreading `if/else` ladders.
+
+#### Incidents fixed during implementation
+
+None this stage. The Flyway migration applied cleanly (`ADD COLUMN ... DEFAULT 0` is a
+constant-time operation on Postgres ≥ 11), Hibernate schema validation accepted the new
+column without coercion (`BIGINT` ↔ Java `long` is the default mapping), and the new
+exception handler hooked into the existing `@RestControllerAdvice` chain without ordering
+issues (Spring picks the most-specific handler regardless of declaration order).
+
+#### Tests added
+
+Minimum-test policy applied: 1 representative case per branch class.
+
+- `complaint/model/ComplaintStatusTransitionTest` — **6 tests**:
+  - happy path: full SUBMITTED → ASSIGNED → IN_PROGRESS → RESOLVED → CLOSED.
+  - SUBMITTED's terminal alternatives (cancel / reject / duplicate).
+  - `null` from-status: only SUBMITTED target allowed (initial insert).
+  - `requireValid` throws `COMPLAINT_INVALID_STATE_TRANSITION` on rollback edges.
+  - Every terminal state refuses every outgoing transition (parameterised across the 4 × 8 grid).
+  - Self-transitions are disallowed (reassignment goes around the validator).
+- `common/exception/GlobalExceptionHandlerTest` — **+1 test** for the new optimistic-lock
+  handler (asserts 409 + `COMPLAINT_VERSION_CONFLICT` envelope).
+
+No new IT — the existing `ComplaintsApplicationIT` + `ComplaintCreationIT` exercise the
+Flyway migration and the `@Version` column end-to-end (Hibernate flushes the version on
+first insert, schema validation passes on context load).
+
+#### Build status
+
+```
+[INFO] Tests run: 73, Failures: 0, Errors: 0, Skipped: 0  (Surefire — unit; +7 from Stage 11: 6 transition + 1 handler)
+[INFO] Tests run:  7, Failures: 0, Errors: 0, Skipped: 0  (Failsafe — IT;   unchanged set, all still green against V1.4 migration)
+[INFO] BUILD SUCCESS
+docs/openapi.json — unchanged at 33 paths (no controller surface changes).
+```
+
+#### Carry-overs / known follow-ups
+
+- **Stage 13** (next slice) — `ComplaintAssignmentService` (engineer/admin assign + reassign)
+  and `ComplaintTriageService` (severity update, reject, mark-duplicate). Both will compose
+  `ComplaintStatusTransition.requireValid(...)` for status changes and rely on `@Version` for
+  concurrency. New endpoints under `/api/v1/engineer/complaints/{id}/...` and
+  `/api/v1/admin/complaints/{id}/...`.
+- **Domain events** (`ComplaintAssignedEvent`, `ComplaintStatusChangedEvent`, etc.) — Stage 13
+  will introduce the event classes and `@TransactionalEventListener` audit-side sinks land in
+  Phase 7. Stage 12 deliberately ships no events: there is no state change to publish about.
+- **Re-open transition** (`CLOSED → SUBMITTED-or-equivalent`) — explicitly not in v1 per BRD §3.4.
+  If a future revision adds it, the allow-table is the single edit point; no service-side
+  refactor needed.
+- **`ComplaintStatusTransition` ArchUnit guard** — there is no rule yet preventing a service from
+  mutating `complaint.status` without going through the validator. Worth adding alongside the
+  cross-module entity-leak rule when we revisit ArchUnit. Until then, code review owns it.
+
+---
+
 ## How to update this log
 
 1. At the end of a stage, append (or fill in) the corresponding subsection.

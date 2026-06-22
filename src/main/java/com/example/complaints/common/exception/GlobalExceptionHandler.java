@@ -7,6 +7,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -95,6 +96,22 @@ public class GlobalExceptionHandler {
         log.warn("Multipart upload exceeded servlet limit: {}", ex.getMessage());
         return build(ErrorCode.IMAGE_TOO_LARGE.httpStatus(), ErrorCode.IMAGE_TOO_LARGE.name(),
                 ErrorCode.IMAGE_TOO_LARGE.defaultMessage(), null);
+    }
+
+    /**
+     * Hibernate fires this when a {@code @Version}-protected entity is updated against a stale
+     * row (someone else committed a newer version in between read and write). Phase 4 introduces
+     * concurrent updates on {@code complaint}, so we map the framework exception to the
+     * pre-allocated {@link ErrorCode#COMPLAINT_VERSION_CONFLICT} (409). The FE retry contract is
+     * "reload the row and let the user reapply their action".
+     */
+    @ExceptionHandler(ObjectOptimisticLockingFailureException.class)
+    public ResponseEntity<ApiResponse<Void>> handleOptimisticLock(ObjectOptimisticLockingFailureException ex) {
+        log.warn("Optimistic-lock conflict on {} id={}: {}",
+                ex.getPersistentClassName(), ex.getIdentifier(), ex.getMessage());
+        return build(ErrorCode.COMPLAINT_VERSION_CONFLICT.httpStatus(),
+                ErrorCode.COMPLAINT_VERSION_CONFLICT.name(),
+                ErrorCode.COMPLAINT_VERSION_CONFLICT.defaultMessage(), null);
     }
 
     @ExceptionHandler(Exception.class)

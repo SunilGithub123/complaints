@@ -5,15 +5,16 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Targeted coverage for the {@link MaxUploadSizeExceededException} handler — the only handler
- * in {@link GlobalExceptionHandler} that maps an infrastructure-level Spring exception onto a
- * business {@link ErrorCode}. Other handlers in this class are covered indirectly by the per-
- * controller WebMvcTest happy/unhappy pairs (Stage 1–10 pattern).
+ * Targeted coverage for the infrastructure-level handlers in {@link GlobalExceptionHandler}
+ * that map Spring framework exceptions onto a business {@link ErrorCode}. Other handlers in
+ * this class are covered indirectly by the per-controller WebMvcTest happy/unhappy pairs
+ * (Stage 1–10 pattern).
  */
 class GlobalExceptionHandlerTest {
 
@@ -31,6 +32,20 @@ class GlobalExceptionHandlerTest {
         assertThat(body.success()).isFalse();
         assertThat(body.error()).isNotNull();
         assertThat(body.error().code()).isEqualTo(ErrorCode.IMAGE_TOO_LARGE.name());
+    }
+
+    @Test
+    @DisplayName("ObjectOptimisticLockingFailureException is mapped to COMPLAINT_VERSION_CONFLICT (409)")
+    void optimisticLockFailure_mapsToVersionConflict() {
+        ResponseEntity<ApiResponse<Void>> response = handler.handleOptimisticLock(
+                new ObjectOptimisticLockingFailureException("com.example.complaints.complaint.model.Complaint", 42L));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        ApiResponse<Void> body = response.getBody();
+        assertThat(body).isNotNull();
+        assertThat(body.success()).isFalse();
+        assertThat(body.error()).isNotNull();
+        assertThat(body.error().code()).isEqualTo(ErrorCode.COMPLAINT_VERSION_CONFLICT.name());
     }
 }
 

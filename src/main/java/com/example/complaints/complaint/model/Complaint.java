@@ -8,6 +8,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
@@ -103,5 +104,16 @@ public class Complaint {
 
     @Column(name = "closed_at")
     private Instant closedAt;
+
+    /**
+     * Optimistic-lock counter (Phase 4). Incremented by Hibernate on every flush; mismatched
+     * values on update fire {@code ObjectOptimisticLockingFailureException}, which
+     * {@link com.example.complaints.common.exception.GlobalExceptionHandler} maps to
+     * {@code COMPLAINT_VERSION_CONFLICT} (409). Distinct from the time-based {@code updated_at}
+     * column.
+     */
+    @Version
+    @Column(name = "version", nullable = false)
+    private long version;
 }
 
