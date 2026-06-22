@@ -7,11 +7,14 @@ import com.example.complaints.complaint.dto.CancelComplaintRequest;
 import com.example.complaints.complaint.dto.ComplaintDetailResponse;
 import com.example.complaints.complaint.dto.ConsumerComplaintHistoryEntryResponse;
 import com.example.complaints.complaint.dto.ConsumerComplaintListItemResponse;
+import com.example.complaints.complaint.dto.FeedbackResponse;
 import com.example.complaints.complaint.dto.SubmitComplaintRequest;
 import com.example.complaints.complaint.dto.SubmitComplaintResponse;
+import com.example.complaints.complaint.dto.SubmitFeedbackRequest;
 import com.example.complaints.complaint.model.ComplaintStatus;
 import com.example.complaints.complaint.service.ComplaintCancellationService;
 import com.example.complaints.complaint.service.ComplaintCreationService;
+import com.example.complaints.complaint.service.ComplaintFeedbackService;
 import com.example.complaints.complaint.service.ComplaintReadService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -63,6 +66,7 @@ public class ConsumerComplaintController {
     private final ComplaintCreationService creation;
     private final ComplaintReadService read;
     private final ComplaintCancellationService cancellation;
+    private final ComplaintFeedbackService feedback;
 
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @Operation(
@@ -144,6 +148,23 @@ public class ConsumerComplaintController {
     ) {
         cancellation.cancel(caller, ticketNo, req);
         return ResponseEntity.ok(ApiResponse.ok(null));
+    }
+
+    @PostMapping("/{ticketNo}/feedback")
+    @Operation(
+            summary = "Submit feedback for a CLOSED complaint (one-shot, idempotent at DB level)",
+            description = "Rating is 1..5; comment is optional. Allowed only after the complaint "
+                    + "is CLOSED → 409 FEEDBACK_NOT_ALLOWED_YET while it's still open. One row "
+                    + "per complaint (UNIQUE on complaint_id) → 409 FEEDBACK_ALREADY_SUBMITTED "
+                    + "on a second attempt."
+    )
+    public ResponseEntity<ApiResponse<FeedbackResponse>> submitFeedback(
+            @AuthenticationPrincipal VerifiedConsumer caller,
+            @PathVariable String ticketNo,
+            @Valid @org.springframework.web.bind.annotation.RequestBody SubmitFeedbackRequest req
+    ) {
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.ok(feedback.submit(caller, ticketNo, req)));
     }
 
     /**

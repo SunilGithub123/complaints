@@ -8,5 +8,12 @@ import org.springframework.data.jpa.repository.JpaRepository;
  * (see {@code ROADMAP.md} Phase 5).
  */
 public interface FeedbackRepository extends JpaRepository<Feedback, Long> {
-}
 
+    /**
+     * Idempotency check for {@code POST /consumer/complaints/{ticketNo}/feedback}. The
+     * underlying {@code UNIQUE (complaint_id)} constraint is the real safety net; this lookup
+     * lets us return the friendlier {@code FEEDBACK_ALREADY_SUBMITTED} error code instead of
+     * waiting for the DB constraint violation.
+     */
+    boolean existsByComplaintId(Long complaintId);
+}

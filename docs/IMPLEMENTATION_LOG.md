@@ -2316,6 +2316,98 @@ schema change (`cancellation_reason` column has existed since V1.0).
 
 ---
 
+### Stage 19 — Consumer feedback
+
+Closes Phase 5. The consumer can now rate a `CLOSED` complaint with a 1–5 star rating plus an
+optional free-text comment, once per complaint. `Feedback` entity + `UNIQUE(complaint_id)` index
+existed since the Stage 10b schema; this slice adds the write path + validation + tests.
+
+#### Scope delivered
+
+- **`POST /api/v1/consumer/complaints/{ticketNo}/feedback`** — body
+  `{ rating: 1..5 (required), comment?: string (≤1000) }`. Returns `201 Created` with
+  `ApiResponse<FeedbackResponse>` carrying `{ id, rating, comment, submittedAt }` so the FE
+  can render the "thanks for your feedback" screen without a follow-up GET.
+- **New service `ComplaintFeedbackService`** — single `submit(...)` method, mirrors the
+  one-class-per-business-capability pattern used by `ComplaintCancellationService` /
+  assignment / triage / resolution / closure.
+- **New DTOs**: `SubmitFeedbackRequest` (with `@NotNull @Min(1) @Max(5)` on rating,
+  `@Size(max=1000)` on comment), `FeedbackResponse`.
+- **`FeedbackRepository.existsByComplaintId(Long)`** — friendly idempotency check; the
+  `UNIQUE(complaint_id)` constraint on `feedback` is the real safety net.
+- **`ComplaintMapper.toFeedbackResponse(Feedback)`** — entity → response with IST timestamp.
+
+#### Design decisions
+
+- **Check order: ticket exists → ownership → state → duplicate.** Ownership before state
+  / dup so a non-owner gets a uniform `403 COMPLAINT_NOT_OWNED_BY_CONSUMER` regardless of
+  the underlying complaint's state — same privacy posture as Stage 17 reads + Stage 18
+  cancellation. Probing for "is there feedback on ticket X" is not a thing we want to enable.
+- **`CLOSED`-only.** `CANCELLED` / `REJECTED` / `DUPLICATE` complaints have no resolution
+  to rate; `SUBMITTED` / `ASSIGNED` / `IN_PROGRESS` / `RESOLVED` aren't done yet. Net error
+  code is the existing `FEEDBACK_NOT_ALLOWED_YET` (added in Stage 10b's schema-side enum prep).
+- **Comment normalised to `null` when blank.** Same pattern as `cancellation_reason` —
+  empty / whitespace-only land as SQL `NULL` rather than empty string, simplifying the staff
+  read screen.
+- **`Feedback` entity not enriched onto `ComplaintDetailResponse` yet.** The FE may want a
+  "has feedback been left?" indicator on the consumer detail screen; the cheap path is a new
+  field on the existing detail response. <b>Deliberately not built this slice</b> — second-time
+  rule. If FE asks, it's a 10-line follow-up (one mapper arg + one `findByComplaintId` call +
+  one response field). For now the FE can hold the freshly-submitted `FeedbackResponse` in
+  React-Query cache.
+- **No GET feedback endpoint.** Same rationale as above — premature until there's a real
+  caller. The detail enrichment will fill that gap when the time comes.
+
+#### Tests added (6)
+
+- `ComplaintFeedbackServiceTest`:
+  - `submit_happyPath` — happy path, `ArgumentCaptor` asserts comment was blank-normalised to `null`.
+  - `submit_notClosed_rejected` — `IN_PROGRESS` complaint → `FEEDBACK_NOT_ALLOWED_YET`.
+  - `submit_duplicate_rejected` — `existsByComplaintId` returns true → `FEEDBACK_ALREADY_SUBMITTED`.
+  - `submit_foreignTicket_rejected` — ownership enforced before state / dup checks.
+- `ConsumerComplaintControllerTest`:
+  - `feedback_happy_201` — MockMvc: 201 + envelope + `$.data.id`/`$.data.rating`.
+  - `feedback_invalidRating_400` — `rating: 6` rejected by bean-validation as
+    `VALIDATION_FAILED`.
+
+#### Incidents fixed during implementation
+
+- **None of note.** The IDE-cache import drift recurred again (controller field + mapper
+  entity import + test file imports + `@MockitoBean` field — all silently reverted between
+  successive `replace_string_in_file` calls). Recognised faster this time: every
+  controller / test edit was followed by an immediate `grep` to confirm persistence before
+  running tests, which cut the retry loop down. Worth noting in the implementation log as a
+  recurring symptom — the cause appears to be IntelliJ's auto-reformatter racing with the
+  edit tool when both touch the same file in quick succession.
+
+#### Build status
+
+- `./mvnw verify` green.
+- **142 unit + 8 IT**, OpenAPI **51 paths** (was 50; +1 `POST /feedback`).
+
+#### Phase 5 — closing summary
+
+| Stage | Surface | Tests |
+|------:|--------|-------|
+| 17    | Consumer tracking list + enriched detail + safe history (2 new GETs, detail enriched, 2 new DTOs, 1 new spec) | +5 |
+| 18    | Consumer cancellation (1 new POST, 1 service, 1 DTO) | +5 |
+| 19    | Consumer feedback (1 new POST, 1 service, 2 DTOs, 1 repo helper, 1 mapper method) | +6 |
+
+Phase 5 BE done-criteria: the consumer can submit, track, history-inspect, cancel-while-eligible,
+and rate-after-close every complaint they raise — with zero exposure of internal MSEB staff
+identities, internal reason fields, or other consumers' tickets. All gated by the 5-minute
+consumer-verify token; all owner-checked at the service layer with a uniform 403 on foreign
+access. Phase 6 (notifications + domain events) is now the natural next phase.
+
+#### Carry-overs / known follow-ups
+
+- **Detail enrichment with `feedback`** — defer until FE asks. Cheap when needed.
+- **Admin / staff feedback read surface** — staff may eventually want "average rating per
+  technician / DC". Not in v1 BRD; would land in Phase 7 (analytics) anyway.
+- **Notification on close** ("Your complaint is closed — rate the resolution") — Phase 6.
+
+---
+
 ## How to update this log
 
 1. At the end of a stage, append (or fill in) the corresponding subsection.

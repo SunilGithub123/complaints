@@ -10,10 +10,13 @@ import com.example.complaints.complaint.dto.ComplaintDetailResponse;
 import com.example.complaints.complaint.dto.ConsumerComplaintHistoryEntryResponse;
 import com.example.complaints.complaint.dto.ConsumerComplaintListItemResponse;
 import com.example.complaints.complaint.dto.CancelComplaintRequest;
+import com.example.complaints.complaint.dto.FeedbackResponse;
 import com.example.complaints.complaint.dto.SubmitComplaintResponse;
+import com.example.complaints.complaint.dto.SubmitFeedbackRequest;
 import com.example.complaints.complaint.model.ComplaintStatus;
 import com.example.complaints.complaint.service.ComplaintCancellationService;
 import com.example.complaints.complaint.service.ComplaintCreationService;
+import com.example.complaints.complaint.service.ComplaintFeedbackService;
 import com.example.complaints.complaint.service.ComplaintReadService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -57,6 +60,7 @@ class ConsumerComplaintControllerTest {
     @MockitoBean ComplaintCreationService creation;
     @MockitoBean ComplaintReadService read;
     @MockitoBean ComplaintCancellationService cancellation;
+    @MockitoBean ComplaintFeedbackService feedback;
     // ConsumerVerificationFilter is bean-injected by the slice even when addFilters=false.
     @MockitoBean JwtFactory jwtFactory;
 
@@ -203,6 +207,31 @@ class ConsumerComplaintControllerTest {
                         .content("{}"))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.error.code").value("COMPLAINT_NOT_IN_SUBMITTED_STATE"));
+    }
+
+    @Test
+    @DisplayName("POST /complaints/{ticketNo}/feedback — happy path returns 201 with persisted FeedbackResponse")
+    void feedback_happy_201() throws Exception {
+        when(feedback.submit(any(), eq("MH20260600000007"), any(SubmitFeedbackRequest.class)))
+                .thenReturn(new FeedbackResponse(101L, 5, "Great work!", OffsetDateTime.now()));
+
+        mockMvc.perform(post("/api/v1/consumer/complaints/{t}/feedback", "MH20260600000007")
+                        .contentType(APPLICATION_JSON)
+                        .content("{\"rating\":5,\"comment\":\"Great work!\"}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.id").value(101))
+                .andExpect(jsonPath("$.data.rating").value(5));
+    }
+
+    @Test
+    @DisplayName("POST /complaints/{ticketNo}/feedback — rating out of range → 400 VALIDATION_FAILED")
+    void feedback_invalidRating_400() throws Exception {
+        mockMvc.perform(post("/api/v1/consumer/complaints/{t}/feedback", "MH20260600000007")
+                        .contentType(APPLICATION_JSON)
+                        .content("{\"rating\":6}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("VALIDATION_FAILED"));
     }
 }
 

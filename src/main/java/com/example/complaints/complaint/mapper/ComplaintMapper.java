@@ -8,10 +8,12 @@ import com.example.complaints.complaint.dto.ComplaintListItemResponse;
 import com.example.complaints.complaint.dto.ComplaintStaffDetailResponse;
 import com.example.complaints.complaint.dto.ConsumerComplaintHistoryEntryResponse;
 import com.example.complaints.complaint.dto.ConsumerComplaintListItemResponse;
+import com.example.complaints.complaint.dto.FeedbackResponse;
 import com.example.complaints.complaint.dto.SubmitComplaintResponse;
 import com.example.complaints.complaint.model.Complaint;
 import com.example.complaints.complaint.model.ComplaintHistory;
 import com.example.complaints.complaint.model.ComplaintImage;
+import com.example.complaints.complaint.model.Feedback;
 import com.example.complaints.storage.StorageService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -90,6 +92,15 @@ public class ComplaintMapper {
                 h.getToStatus(),
                 h.getNote(),
                 DateUtils.toIst(h.getChangedAt())
+        );
+    }
+
+    public FeedbackResponse toFeedbackResponse(Feedback f) {
+        return new FeedbackResponse(
+                f.getId(),
+                f.getRating(),
+                f.getComment(),
+                DateUtils.toIst(f.getCreatedAt())
         );
     }
 
