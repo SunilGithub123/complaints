@@ -567,13 +567,13 @@ FE-side list lives in the FE log.
 
 ---
 
-### Stage 8 · Frontend profile editor + proactive `useMe` at boot — 🟡 partially shipped
+### Stage 8  Frontend profile editor + proactive `useMe` at boot — ✅ 2026-06-22
 
 Stage 8 split into three ships across the two repos:
 
 - **Stage 8a** — FE-led: boot-time `useMe` revalidation in `RequireAuth`. **✅ 2026-06-22.**
 - **Stage 8b prerequisite** — BE-led: new `PUT /api/v1/staff/me` endpoint. **✅ 2026-06-22.**
-- **Stage 8b** — FE-led: self-service profile editor screen. **☐ pending FE re-sync** of the now-updated `openapi.json` → `pnpm api:gen` → ship the screen.
+- **Stage 8b** — FE-led: self-service profile editor screen. **✅ 2026-06-22.** Re-synced `openapi.json` → `pnpm api:gen` → built `/profile` against `useUpdateMyProfile`.
 
 ---
 
@@ -663,25 +663,20 @@ docs/openapi.json — 29 paths (was 28); +1 PUT /api/v1/staff/me, +1 schema Upda
 
 ---
 
-#### Stage 8b · FE profile editor — ☐ unblocked, awaiting FE re-sync
+#### Stage 8b · FE profile editor — ✅ 2026-06-22
 
 The BE `PUT /api/v1/staff/me` endpoint and refreshed `openapi.json` (29
 paths, includes the new `UpdateMyProfileRequest` schema) shipped before
 Stage 8a wrapped — the FE agent picked up an older snapshot during 8a so
 the generated client did not yet contain the write hook, and 8b was
-correctly parked rather than stubbing a fake endpoint.
+correctly parked rather than stubbing a fake endpoint. **Resolved
+2026-06-22**: FE re-synced the spec, regenerated, and shipped
+`/profile` against `useUpdateMyProfile`. See
+[`complaints-frontend/docs/IMPLEMENTATION_LOG.md`](../../complaints-frontend/docs/IMPLEMENTATION_LOG.md)
+Stage 8b entry for the FE-side detail.
 
-**Unblock procedure** for the FE:
-
-```bash
-# from complaints-frontend/
-cp ../complaints/docs/openapi.json packages/api/openapi.json
-pnpm api:gen
-# generated client now exposes the PUT /staff/me hook
-```
-
-Then resume the Stage 8b prompt (profile editor screen + change-password
-CTA + EN/MR strings + 2-test slice).
+**Phase 2 wraps here.** Next FE work is Phase 3 (consumer OTP +
+complaint submit PWA), which is BE-led.
 
 ---
 
