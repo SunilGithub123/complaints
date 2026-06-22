@@ -2,6 +2,7 @@ package com.example.complaints.masterdata.service;
 
 import com.example.complaints.common.exception.BusinessException;
 import com.example.complaints.common.exception.ErrorCode;
+import com.example.complaints.complaint.service.ComplaintQueryService;
 import com.example.complaints.masterdata.dto.ComplaintCategoryRequest;
 import com.example.complaints.masterdata.dto.ComplaintCategoryResponse;
 import com.example.complaints.masterdata.mapper.ComplaintCategoryMapper;
@@ -11,21 +12,27 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.Optional;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class ComplaintCategoryServiceTest {
 
     private ComplaintCategoryRepository repo;
+    private ComplaintQueryService complaintQuery;
     private ComplaintCategoryService service;
 
     @BeforeEach
     void setUp() {
         repo = mock(ComplaintCategoryRepository.class);
-        service = new ComplaintCategoryService(repo, new ComplaintCategoryMapper());
+        complaintQuery = mock(ComplaintQueryService.class);
+        service = new ComplaintCategoryService(repo, new ComplaintCategoryMapper(), complaintQuery);
         when(repo.save(any(ComplaintCategory.class))).thenAnswer(inv -> {
             ComplaintCategory c = inv.getArgument(0);
             c.setId(7L);
@@ -69,6 +76,47 @@ class ComplaintCategoryServiceTest {
 
         assertThat(page.content()).hasSize(1);
         assertThat(page.content().get(0).code()).isEqualTo("POWER_OUTAGE");
+    }
+
+    @Test
+    @DisplayName("setActive(false) is blocked when open complaints reference the category")
+    void setActive_deactivateBlockedByOpenComplaints() {
+        ComplaintCategory existing = ComplaintCategory.builder()
+                .id(5L).code("POWER_OUTAGE").name("Power Outage").slaHours(8).active(true).build();
+        when(repo.findById(5L)).thenReturn(Optional.of(existing));
+        when(complaintQuery.existsOpenForCategory(5L)).thenReturn(true);
+
+        assertThatThrownBy(() -> service.setActive(5L, false))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.errorCode()).isEqualTo(ErrorCode.CATEGORY_HAS_OPEN_COMPLAINTS));
+        assertThat(existing.isActive()).isTrue();   // not mutated
+    }
+
+    @Test
+    @DisplayName("setActive(false) succeeds when no open complaints reference the category")
+    void setActive_deactivateSucceedsWhenNoOpenComplaints() {
+        ComplaintCategory existing = ComplaintCategory.builder()
+                .id(5L).code("POWER_OUTAGE").name("Power Outage").slaHours(8).active(true).build();
+        when(repo.findById(5L)).thenReturn(Optional.of(existing));
+        when(complaintQuery.existsOpenForCategory(5L)).thenReturn(false);
+
+        ComplaintCategoryResponse res = service.setActive(5L, false);
+
+        assertThat(res.active()).isFalse();
+        assertThat(existing.isActive()).isFalse();
+    }
+
+    @Test
+    @DisplayName("setActive(true) never consults the complaint module (re-activation is always safe)")
+    void setActive_reactivationSkipsOpenCheck() {
+        ComplaintCategory existing = ComplaintCategory.builder()
+                .id(5L).code("POWER_OUTAGE").name("Power Outage").slaHours(8).active(false).build();
+        when(repo.findById(5L)).thenReturn(Optional.of(existing));
+
+        service.setActive(5L, true);
+
+        assertThat(existing.isActive()).isTrue();
+        verify(complaintQuery, never()).existsOpenForCategory(any());
     }
 }
 

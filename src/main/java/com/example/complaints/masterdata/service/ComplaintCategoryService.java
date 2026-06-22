@@ -3,6 +3,7 @@ package com.example.complaints.masterdata.service;
 import com.example.complaints.common.dto.PageResponse;
 import com.example.complaints.common.exception.BusinessException;
 import com.example.complaints.common.exception.ErrorCode;
+import com.example.complaints.complaint.service.ComplaintQueryService;
 import com.example.complaints.config.CaffeineCacheConfig;
 import com.example.complaints.masterdata.dto.ComplaintCategoryRequest;
 import com.example.complaints.masterdata.dto.ComplaintCategoryResponse;
@@ -22,6 +23,7 @@ public class ComplaintCategoryService {
 
     private final ComplaintCategoryRepository repo;
     private final ComplaintCategoryMapper mapper;
+    private final ComplaintQueryService complaintQuery;
 
     @Transactional(readOnly = true)
     public PageResponse<ComplaintCategoryResponse> list(Pageable pageable) {
@@ -76,9 +78,12 @@ public class ComplaintCategoryService {
     @CacheEvict(value = CaffeineCacheConfig.CACHE_CATEGORIES, allEntries = true)
     public ComplaintCategoryResponse setActive(Long id, boolean active) {
         ComplaintCategory c = load(id);
-        // TODO(sunil, phase-3): once the `complaint` module lands, block deactivation
-        //   when open (non-terminal-status) complaints reference this category.
-        //   Until then, category deactivation is effectively staff-discipline-only.
+        // Guard: closing the Stage 6 carry-over now that the `complaint` module exists.
+        // Cross-module hop goes through ComplaintQueryService to keep the masterdata service
+        // off the complaint.repository surface (enforced by ArchUnit).
+        if (!active && complaintQuery.existsOpenForCategory(id)) {
+            throw new BusinessException(ErrorCode.CATEGORY_HAS_OPEN_COMPLAINTS);
+        }
         c.setActive(active);
         return mapper.toResponse(c);
     }

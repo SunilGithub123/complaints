@@ -13,6 +13,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.servlet.NoHandlerFoundException;
 
 import java.util.HashMap;
@@ -78,6 +79,22 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiResponse<Void>> handleNoHandler(NoHandlerFoundException ex) {
         return build(HttpStatus.NOT_FOUND, ErrorCode.NOT_FOUND.name(),
                 "Route not found: " + ex.getRequestURL(), null);
+    }
+
+    /**
+     * Spring fires this <b>before</b> {@code @RequestPart} validation when the raw multipart
+     * size exceeds the servlet container limits (defaults: {@code spring.servlet.multipart.max-file-size}
+     * 1 MB, {@code max-request-size} 10 MB). The {@code ComplaintImageService}'s explicit
+     * {@code IMAGE_TOO_LARGE} check never gets a chance to run in this case.
+     *
+     * <p>Map both paths to the same {@code IMAGE_TOO_LARGE} (413) error code so the FE doesn't
+     * have to disambiguate "raw multipart limit blown" vs "validated per-image size exceeded".</p>
+     */
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public ResponseEntity<ApiResponse<Void>> handleMaxUploadSize(MaxUploadSizeExceededException ex) {
+        log.warn("Multipart upload exceeded servlet limit: {}", ex.getMessage());
+        return build(ErrorCode.IMAGE_TOO_LARGE.httpStatus(), ErrorCode.IMAGE_TOO_LARGE.name(),
+                ErrorCode.IMAGE_TOO_LARGE.defaultMessage(), null);
     }
 
     @ExceptionHandler(Exception.class)

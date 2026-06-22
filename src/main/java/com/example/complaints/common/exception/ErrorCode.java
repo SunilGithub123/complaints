@@ -59,6 +59,7 @@ public enum ErrorCode {
     CATEGORY_NOT_FOUND             (HttpStatus.NOT_FOUND,             "Complaint category not found"),
     CATEGORY_INACTIVE              (HttpStatus.CONFLICT,              "Complaint category is inactive"),
     CATEGORY_CODE_TAKEN            (HttpStatus.CONFLICT,              "Complaint category code already in use"),
+    CATEGORY_HAS_OPEN_COMPLAINTS   (HttpStatus.CONFLICT,              "Complaint category cannot be deactivated while open complaints reference it"),
 
     // ---------- Complaint lifecycle ----------
     COMPLAINT_NOT_FOUND            (HttpStatus.NOT_FOUND,             "Complaint not found"),

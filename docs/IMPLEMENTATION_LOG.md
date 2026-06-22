@@ -1046,6 +1046,105 @@ docs/openapi.json — 33 paths (was 32); +1: GET /api/v1/consumer/masterdata/cat
 
 ---
 
+#### Stage 10b · Post-stage follow-ups (3 small wins while FE works Stage 11) — ✅ 2026-06-22
+
+> Three independent BE follow-ups closed while the FE agent runs Stage 11. Each one shipped
+> green on its own; combined they harden the Phase 3 surface without touching anything the
+> FE is touching.
+
+##### 1. `MaxUploadSizeExceededException` → `IMAGE_TOO_LARGE` (413)
+
+Spring fires `MaxUploadSizeExceededException` **before** `@RequestPart` validation when the
+raw multipart bytes exceed the servlet container limits (`spring.servlet.multipart.max-file-size`
+1 MB / `max-request-size` 10 MB by default). `ComplaintImageService`'s explicit per-image
+`IMAGE_TOO_LARGE` check therefore never runs for that path — it used to fall through to the
+generic `Exception` handler in `GlobalExceptionHandler` and surface as `500 INTERNAL_ERROR`.
+
+Added a dedicated `@ExceptionHandler(MaxUploadSizeExceededException.class)` that maps both paths
+to the same `IMAGE_TOO_LARGE` (413). FE never has to disambiguate "raw multipart blew" vs
+"validated image too big". 1 unit test in the new `GlobalExceptionHandlerTest`.
+
+##### 2. Category-deactivation open-complaints guard (Stage 6 carry-over closed)
+
+The `TODO(sunil, phase-3)` in `ComplaintCategoryService.setActive` finally has a home: an admin
+can no longer deactivate a category while open (SUBMITTED / ASSIGNED / IN_PROGRESS) complaints
+reference it. Terminal-status complaints (RESOLVED / CLOSED / CANCELLED / REJECTED / DUPLICATE)
+do **not** block deactivation — once a complaint exits the live workflow, the category row
+is decorative for it.
+
+Cross-module hop respects the ArchUnit `modules_must_not_call_other_modules_repositories` rule:
+
+- New `complaint.service.ComplaintQueryService.existsOpenForCategory(Long)` — thin, scalar-only
+  read API. Public `OPEN_STATUSES` constant pinned to `{SUBMITTED, ASSIGNED, IN_PROGRESS}` so
+  the next caller (DC deactivation guard in Phase 4, list-screen badges, etc.) reuses the same
+  semantics rather than re-deriving them.
+- New `ComplaintRepository.existsByCategoryIdAndStatusIn(Long, Collection<ComplaintStatus>)`.
+- New `ErrorCode.CATEGORY_HAS_OPEN_COMPLAINTS` (409 — same shape as the existing
+  `SUBDIVISION_HAS_ACTIVE_DCS` etc.).
+- `ComplaintCategoryService` injects `ComplaintQueryService` and calls it from `setActive(...)`
+  **only when transitioning active→inactive** (re-activation is always safe and skips the hop).
+
+Removes one of the three `TODO(sunil, phase-3)` markers in the codebase. The other two
+(DC deactivation second guard, audit events) are tracked separately.
+
+Tests: 3 new unit tests in `ComplaintCategoryServiceTest`:
+- happy: deactivation blocked when an open complaint exists → `CATEGORY_HAS_OPEN_COMPLAINTS`,
+  entity never mutated.
+- happy: deactivation succeeds when no open complaints exist.
+- safety: re-activation (`setActive(true)`) never consults the complaint module (Mockito
+  `verify(complaintQuery, never())…`).
+
+ArchUnit's 5 boundary rules still green — confirms the cross-module hop via
+`ComplaintQueryService` is on the allowed side of the line.
+
+##### 3. `ComplaintCreationIT` (Stage 10b carry-over closed)
+
+End-to-end IT against a real Postgres (Testcontainers) and real `LocalStorageService` (temp
+directory created in a static initialiser and wired via `@DynamicPropertySource`). One happy
+path per minimum-test policy:
+
+- Seeds: a subdivision + DC (`SUB-IT-001` / `DC-IT-001`, idempotent — does **not** wipe pre-existing
+  rows because V1.2's bootstrap admin holds an FK into `subdivision`; see incident #1 below)
+  + a consumer-master row (`MH00099999`).
+- Calls `ComplaintCreationService.submit(...)` with a `MockMultipartFile` (3 raw JPEG header bytes).
+- Asserts:
+  - response ticket matches `MH\d{6}\d{8}` and status is `SUBMITTED`;
+  - persisted `complaint` row: status, DC derived from `consumer_master`, contact mobile,
+    SLA deadline = `created_at + 24h` ± 5min (POWER_OUTAGE seed has 24h SLA);
+  - exactly one `complaint_history` row with `(from=null, to=SUBMITTED)`;
+  - exactly one `complaint_image` row with `image_type=COMPLAINT`, `content_type=image/jpeg`,
+    `storage_key` matching `complaint/{id}/COMPLAINT/.*\.jpg`;
+  - the JPEG bytes are actually written to disk at `${STORAGE_ROOT}/<storage_key>`.
+
+##### Incidents fixed during implementation
+
+| # | Symptom | Root cause | Fix |
+|---|---------|-----------|-----|
+| 1 | First run of `ComplaintCreationIT` failed in `@BeforeEach` with `DataIntegrityViolationException: violates foreign key constraint "user_account_subdivision_id_fkey"`. | The `@BeforeEach` did a blanket `subdivisions.deleteAll() / dcs.deleteAll()` to give each test a clean slate. V1.2 seeds the bootstrap admin, whose `user_account.subdivision_id` FK points at the very subdivision row we were trying to wipe. | Reordered the seed logic: only delete the rows owned by this IT (`history`, `images`, `complaints`, `consumers`). For subdivision + DC, `findByCode("SUB-IT-001") || save(...)` — idempotent, never collides with bootstrap row codes (`SUB-NSK-001` etc.), and survives re-runs. Documented inline so the pattern is reusable when the next module-level IT lands. |
+
+##### Build status
+
+```
+[INFO] Tests run: 66, Failures: 0, Errors: 0, Skipped: 0  (Surefire — unit;  +4 from Stage 10b: 1 GlobalExceptionHandler + 3 ComplaintCategoryService)
+[INFO] Tests run:  7, Failures: 0, Errors: 0, Skipped: 0  (Failsafe — IT;    +1 from Stage 10b: ComplaintCreationIT)
+[INFO] BUILD SUCCESS
+docs/openapi.json — unchanged at 33 paths (no controller surface changes).
+```
+
+##### Carry-overs that remain open
+
+- **Stage 10c** — GCS + MSG91 wiring; still blocked on external accounts.
+- **DC deactivation second guard** — same pattern as #2 above (Stage 6 carry-over). The
+  reusable `ComplaintQueryService` constant `OPEN_STATUSES` is now in place, so the DC-side
+  hook is a 30-min job whenever the next DC-deactivation-related issue surfaces. Defer until
+  there's a real call for it.
+- **Cross-module entity leak refactor** — `ComplaintCategoryService.requireActive(Long)`
+  still returns an entity across the module boundary. Tracked from Stage 10b; ArchUnit doesn't
+  enforce this rule yet. Will close together when the matching ArchUnit rule lands.
+- **Audit events** (`CategoryDeactivationBlockedEvent` etc.) — Phase 7.
+
+---
+
 ## How to update this log
 
 1. At the end of a stage, append (or fill in) the corresponding subsection.
