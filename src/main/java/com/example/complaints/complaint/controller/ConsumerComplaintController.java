@@ -32,6 +32,17 @@ import java.util.List;
 /**
  * Consumer-facing complaint endpoints. Gated by {@code ConsumerVerificationFilter}; the
  * {@link VerifiedConsumer} principal is injected via {@code @AuthenticationPrincipal}.
+ *
+ * <h3>Multipart contract gotcha (do not remove)</h3>
+ * The submit endpoint takes one JSON form-part ({@code complaint}) and 0–3 image parts
+ * ({@code images}). The {@code @Operation.requestBody} {@code @Encoding(name="complaint",
+ * contentType=application/json)} below is honoured by humans but <b>not</b> by orval — the
+ * generated FE client appends the JSON part as {@code text/plain} and BE then rejects the
+ * request with {@code 400 VALIDATION_FAILED}. FE works around this with a hand-rolled
+ * {@code submitComplaintMultipart} wrapper that constructs the JSON part as
+ * {@code new Blob([JSON.stringify(req)], { type: 'application/json' })}. Any future multipart
+ * endpoint with a JSON part needs the same wrapper; reported by FE during Stage 11 (see
+ * IMPLEMENTATION_LOG Stage 11 backend-impact entry).
  */
 @RestController
 @RequestMapping("/api/v1/consumer/complaints")

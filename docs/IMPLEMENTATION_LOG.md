@@ -1145,6 +1145,93 @@ docs/openapi.json — unchanged at 33 paths (no controller surface changes).
 
 ---
 
+### Stage 11 · Frontend consumer PWA — ✅ 2026-06-22 (FE-led)
+
+> FE-led shipping of the consumer entry → OTP → submit → confirmation flow against the
+> Phase 3 backend surface. Source of truth for FE scope, gates, and incidents is
+> [`complaints-frontend/docs/IMPLEMENTATION_LOG.md`](../../complaints-frontend/docs/IMPLEMENTATION_LOG.md)
+> Stage 11 entry.
+
+#### Backend impact
+
+- **Zero backend code changes required during the stage itself.** Stage 9 (OTP), Stage 10a
+  (storage / ticket numbers), Stage 10b (submit + read), and the post-stage hotfix
+  (`/api/v1/consumer/masterdata/categories`) collectively covered every endpoint the FE
+  consumed.
+- The three post-stage follow-ups (`MaxUploadSizeExceededException` handler, category
+  open-complaints guard, `ComplaintCreationIT`) were land **before** the FE smoke pass; the
+  first of those was specifically motivated by anticipating an FE-side phantom 5xx.
+
+#### Things the FE found that the BE side now owns
+
+| # | Finding | Action taken |
+|---|---------|--------------|
+| 1 | **orval multipart-JSON contract gap.** orval emits the generated `submitComplaint` with the JSON `complaint` part serialised as `text/plain` rather than `application/json`, even though the OpenAPI spec carries an `@Encoding(name="complaint", contentType="application/json")` annotation. BE then rejects the request as `400 VALIDATION_FAILED`. FE works around it with a hand-rolled `submitComplaintMultipart` wrapper that builds the JSON part via `new Blob([JSON.stringify(req)], { type: 'application/json' })`. | Added a prominent **"Multipart contract gotcha"** Javadoc block on `ConsumerComplaintController` so any future multipart endpoint author sees the warning next to the code. Documented here so reviewers of a new multipart endpoint can spot the same trap before the FE rediscovers it. If we ever swap orval for a different OpenAPI client generator, the multipart contract is the canary that tells us whether the new tool honours `@Encoding`. |
+| 2 | **`OTP_TOO_MANY_ATTEMPTS` lock branch is hard to hit in manual smoke.** BE unit tests cover it (`OtpServiceTest`), but in dev the 30-second cooldown between OTP sends trips first, so the FE could never manually exercise the locked-modal UI without a knob. | Documented `APP_OTP_COOLDOWN_SECONDS=0` (and `APP_OTP_MAX_ATTEMPTS=2`) under `ENVIRONMENT_SETUP.md §1.6 "Useful dev-only overrides"` so future FE agents (and ourselves) can flip the lock branch on for manual UI verification. No code change — Spring Boot's relaxed binding already exposes every `app.*` property as an env var. |
+
+#### Things the FE confirmed went right
+
+- **Stage 10b-hotfix `/consumer/masterdata/categories` move** — the FE called out that fixing
+  the auth boundary before the FE handoff (rather than after they'd already built the wrong
+  thing) saved them from threading "this one endpoint is staff-scoped but public-feeling"
+  through the consumer-side store. Worth repeating: surface security mismatches in handoff
+  prompts, not after FE has wired against them.
+- **403-not-404 on foreign tickets** (Stage 10b `ComplaintReadService`) — let the FE render a
+  specific "this ticket isn't yours" state instead of conflating with "not found". Keep the
+  same pattern when Phase 5 lifecycle endpoints land
+  (`POST /consumer/complaints/{ticketNo}/cancel`, `POST .../feedback`).
+
+#### Phase 5 endpoint shape requested by FE (for planning, no action yet)
+
+The FE flagged the three Phase 5 endpoints it'll need before it can grow the consumer
+"my complaints / cancel / feedback" UI. Already on the roadmap; recorded here so the BE
+side has the requested shapes pre-pinned:
+
+| Endpoint | Notes |
+|----------|-------|
+| `GET /api/v1/consumer/complaints` | List-by-verified-consumer, scoped by the `consumerId` claim on the verification JWT (one consumer can have multiple complaints across the same Consumer ID; mobile is **not** the scoping field). Pagination + `?status=` filter likely. |
+| `POST /api/v1/consumer/complaints/{ticketNo}/cancel` | `SUBMITTED → CANCELLED` transition only. Body: `{ reason }` (required). 409 on any other source state. |
+| `POST /api/v1/consumer/complaints/{ticketNo}/feedback` | One-shot only (UNIQUE on `complaint_id` in `feedback` already enforces this). Allowed only when status = `CLOSED`. Body: `{ rating: 1-5, comment?: string }`. |
+
+Status-transition validator (TECHNICAL_DESIGN §5.4 "Status state machine") is the right
+home for the cancel path; the existing `Feedback` entity + repo (shipped in Stage 10b for
+schema-readiness) means the feedback path is a service + controller, no schema work.
+
+#### Stage 10c (GCS) is now a hard prerequisite for non-loopback deploy
+
+FE highlighted that the confirmation screen renders `<img src={image.url}>` verbatim from
+the `ComplaintMapper`-issued signed URL. In dev that's a `file://` URI — fine on
+`localhost` because the FE dev server has filesystem access, but **renders nothing** from
+any other origin. So a deployed preview / smoke environment for the consumer flow can't
+ship until `GcsStorageService` lands. Same Stage 10c carry-over that's been tracked since
+Stage 10a; the FE has just made the cost-of-deferring concrete. No code action yet —
+still blocked on GCS service-account provisioning.
+
+#### CORS reminder from FE
+
+Dev profile allows `http://localhost:*`. When a deployed preview origin lands, the FE will
+ping us to add it to `app.cors.allowed-origins` before the OTP-send preflight starts 403'ing.
+Tracking inline so it's not lost.
+
+#### Build status
+
+```
+[INFO] Tests run: 66, Failures: 0, Errors: 0, Skipped: 0  (Surefire — unit; unchanged)
+[INFO] Tests run:  7, Failures: 0, Errors: 0, Skipped: 0  (Failsafe — IT;   unchanged)
+[INFO] BUILD SUCCESS
+docs/openapi.json — unchanged at 33 paths (FE-led stage, no BE controller changes).
+```
+
+#### Carry-overs that remain open (now annotated with FE pressure)
+
+- **Stage 10c (GCS)** — escalates from "deferred follow-up" to "hard prerequisite for any non-loopback preview" per FE feedback above.
+- **Phase 5 consumer-side lifecycle endpoints** (`list / cancel / feedback`) — shape pre-pinned above; build when Phase 5 starts.
+- **Cross-module entity leak refactor + ArchUnit rule** — still tracked from Stage 10b.
+- **DC deactivation open-complaints guard** — still tracked; `OPEN_STATUSES` constant is ready.
+- **OpenAPI spec-drift CI guard** — still Phase 7 per the existing plan.
+
+---
+
 ## How to update this log
 
 1. At the end of a stage, append (or fill in) the corresponding subsection.

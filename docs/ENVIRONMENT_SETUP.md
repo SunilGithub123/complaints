@@ -76,6 +76,19 @@ docker compose down              # keep data
 docker compose down -v           # wipe data
 ```
 
+### 1.6 Useful dev-only overrides
+
+Spring Boot binds every `app.*` property to a matching env var via [relaxed binding](https://docs.spring.io/spring-boot/docs/current/reference/html/features.html#features.external-config.typesafe-configuration-properties.relaxed-binding). A few that come up during manual smoke testing:
+
+| Env var | Default | Why you'd override it |
+|---------|---------|-----------------------|
+| `APP_OTP_COOLDOWN_SECONDS` | `30` | Set to `0` to exercise the `OTP_TOO_MANY_ATTEMPTS` lock branch without waiting 30s between OTP sends (FE Stage 11 reported this path is otherwise hard to hit in manual smoke). |
+| `APP_OTP_MAX_ATTEMPTS` | `5` | Lower it (e.g. `2`) to trip the lock in two wrong submissions. |
+| `APP_STORAGE_LOCAL_PATH` | `./uploads` | Point at a tmpfs path for faster IT-style local loops. |
+| `APP_COMPLAINT_MAX_IMAGE_BYTES` | `1048576` | Raise it to debug the `IMAGE_TOO_LARGE` → 413 multipart handler against a non-compressed photo. |
+
+These are *dev-only knobs* — never set them in test / prod profiles without a code change to match.
+
 ---
 
 ## 2. TEST — Cloud-hosted on GCP VM (~$15/month)
