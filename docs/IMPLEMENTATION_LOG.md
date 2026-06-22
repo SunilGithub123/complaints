@@ -919,6 +919,96 @@ docs/openapi.json — unchanged at 30 paths (Stage 10a ships no endpoints).
 
 ---
 
+#### Stage 10b · `complaint` entities + submit + read endpoints — ✅ 2026-06-22
+
+> Builds on 10a. Ships the first consumer-facing `/api/v1/consumer/**` endpoint pair and
+> exercises the `VerifiedConsumer` principal end-to-end. Two endpoints: single multipart
+> submit + a minimal owned-ticket read for the FE confirmation screen.
+
+##### Scope delivered
+
+**Entities (`complaint.model`):** `Complaint`, `ComplaintImage`, `ComplaintHistory`, `Feedback` (model + repo only — feedback writes/reads land in Phase 5). All map directly to `V1.0__init_schema.sql` (no migration this stage). Enums extracted: `ComplaintStatus`, `ComplaintImageType`, `ComplaintSeverity`. Stage 10b uses only the submit-time subset of `Complaint`; assignment / resolution / closure fields are present-but-null until Phase 4 services fill them.
+
+**Repositories (`complaint.repository`):** `ComplaintRepository` (with `findByTicketNo`), `ComplaintImageRepository` (with `findByComplaintIdOrderByIdAsc`), `ComplaintHistoryRepository` (with `findByComplaintIdOrderByChangedAtAsc`), `FeedbackRepository` (empty — model only).
+
+**DTOs (`complaint.dto`, all records):**
+- `SubmitComplaintRequest(consumerId, mobile, categoryId, description, location?)` — full `jakarta.validation` set on the record components (`@NotBlank`, `@Pattern(mobile)`, `@Size(description ≤ 4000)`, `@Size(location ≤ 500)`).
+- `SubmitComplaintResponse(complaintId, ticketNo, status, submittedAt, slaDeadline, images)` — everything the FE needs to render the confirmation screen in **one** response, no follow-up calls.
+- `ComplaintDetailResponse` — superset of submit response with `consumerId`, `contactMobile`, `categoryId`, `description`, `location`.
+- `ComplaintImageResponse(id, contentType, sizeBytes, url, uploadedAt)` — `url` is freshly minted at every mapping via `StorageService.signedReadUrl(key, 15min)`.
+
+**Mapper (`complaint.mapper.ComplaintMapper`):** hand-written per hard-rule #3. Depends on `StorageService` so URL generation lives where the entity → DTO translation happens (rather than smearing it across services).
+
+**Services (`complaint.service`):**
+- `ComplaintImageService` — validates per-image (`image/jpeg` | `image/png`, ≤ `app.complaint.max-image-bytes`) and per-batch (`≤ app.complaint.max-images`); writes via `StorageService`; persists `complaint_image` rows. On any failure mid-batch, **best-effort cleanup** of already-stored keys before rethrowing as `BusinessException(IMAGE_UPLOAD_FAILED)` so the surrounding transaction can roll back the DB side cleanly. Storage key format: `complaint/{complaintId}/COMPLAINT/{uuid}.{jpg|png}`.
+- `ComplaintCreationService` — `@Transactional` end-to-end submit:
+  1. Verify `request.consumerId == verified-JWT.consumerId` → else `COMPLAINT_NOT_OWNED_BY_CONSUMER` (anti-tamper; verified token wins).
+  2. `ConsumerLookupService.requireActiveByConsumerId(...)` (re-load + active check).
+  3. `ComplaintCategoryService.requireActive(...)` (re-load + active check; takes `slaHours` from the category for SLA calc).
+  4. `TicketNumberService.nextTicketNumber()` (runs in `REQUIRES_NEW`, mints + commits the sequence row in its own tx so the submit tx's commit window stays short).
+  5. Persist `Complaint` (status=`SUBMITTED`, `sla_deadline = nowIst() + category.slaHours`, `distribution_center_id` derived from `consumer_master`).
+  6. Persist initial `ComplaintHistory(null → SUBMITTED)`.
+  7. `ComplaintImageService.storeAll(...)` — the single external side-effect inside the tx, honouring the "≤ 1 external call per transaction" hard rule.
+- `ComplaintReadService.getOwnedByTicketNo(caller, ticketNo)` — `@Transactional(readOnly = true)`. Loads by ticket → `COMPLAINT_NOT_FOUND` if missing → ownership check on `consumer_master_id` → `COMPLAINT_NOT_OWNED_BY_CONSUMER` (deliberately distinct from 404 to avoid leaking ticket-number existence per BRD §6 privacy). Maps to `ComplaintDetailResponse` with images.
+
+**Controller (`complaint.controller.ConsumerComplaintController`):**
+- `POST /api/v1/consumer/complaints` (`consumes = multipart/form-data`, returns **201 Created**) — `@RequestPart("complaint") @Valid SubmitComplaintRequest` + `@RequestPart(value="images", required=false) List<MultipartFile>`. `@AuthenticationPrincipal VerifiedConsumer caller`.
+- `GET /api/v1/consumer/complaints/{ticketNo}` — owned-by-caller detail.
+- Springdoc multipart annotations + a documentation-only `SubmitMultipartForm` schema so the generated OpenAPI surfaces the part-layout (`complaint` as `SubmitComplaintRequest`, `images` as `binary[]`). FE codegen and Swagger UI both render the form shape correctly.
+
+**`ErrorCode` additions:** `IMAGE_UPLOAD_FAILED` (HTTP 500). Everything else (`IMAGE_TOO_LARGE`, `IMAGE_INVALID_TYPE`, `IMAGE_LIMIT_EXCEEDED`, `COMPLAINT_NOT_FOUND`, `COMPLAINT_NOT_OWNED_BY_CONSUMER`, `CATEGORY_NOT_FOUND`, `CATEGORY_INACTIVE`, `CONSUMER_NOT_FOUND`, `CONSUMER_INACTIVE`) was already on disk from earlier scaffolding.
+
+**No Flyway migration** — schema for all four tables already in `V1.0__init_schema.sql`. Hard-rule #5 honoured.
+
+##### Incidents fixed during implementation
+
+No new incidents originated in Stage 10b itself — the Hibernate type-mismatch class of bug from 10a (incident #1) didn't recur because the new entities use plain `VARCHAR` / `TEXT` / `TIMESTAMPTZ` columns that map straight from Hibernate defaults. The Stage 8b `SecurityContextHolder` test pattern was reused for `ConsumerComplaintControllerTest` exactly as documented — `@AfterEach clearContext()` + a tiny `authenticate(...)` helper in `@BeforeEach`. The `@RequestPart` + Mockito + multipart combination worked first-try with Spring's `MockMultipartFile` + `MockMvcRequestBuilders.multipart(...)`.
+
+##### Tests added
+
+Minimum-test policy applied: 1 happy + 1 unhappy per service method, WebMvcTest per endpoint.
+
+- `complaint/service/ComplaintImageServiceTest` — **5 tests**:
+  - happy: persists each valid image, returns in input order, correct storage-key shape.
+  - unhappy: unsupported content type → `IMAGE_INVALID_TYPE`, never touches storage.
+  - unhappy: more than `maxImages` → `IMAGE_LIMIT_EXCEEDED`, never touches storage.
+  - unhappy: 2nd image storage write throws → 1st already-written key deleted, rethrown as `IMAGE_UPLOAD_FAILED`.
+  - edge: null / empty list → no-op, no calls to storage or repo.
+- `complaint/service/ComplaintCreationServiceTest` — **2 tests**:
+  - happy: complaint + history persisted; ArgumentCaptor asserts ticket #, status, contact mobile, DC derived from consumer-master, SLA ≈ now + category.slaHours.
+  - unhappy: body's `consumerId` ≠ verified JWT's → `COMPLAINT_NOT_OWNED_BY_CONSUMER`, ticket number never minted, complaint never saved.
+- `complaint/service/ComplaintReadServiceTest` — **3 tests**:
+  - happy: owned ticket → mapped detail.
+  - unhappy: foreign ticket (different `consumer_master_id`) → `COMPLAINT_NOT_OWNED_BY_CONSUMER` (deliberately not 404).
+  - unhappy: missing ticket → `COMPLAINT_NOT_FOUND`.
+- `complaint/controller/ConsumerComplaintControllerTest` (`@WebMvcTest`, `addFilters=false`) — **4 tests**:
+  - `POST /complaints` happy → 201 + ticketNo in `data`.
+  - `POST /complaints` blank `consumerId` → 400 + `VALIDATION_FAILED`.
+  - `GET /complaints/{ticketNo}` happy → 200 + mapped detail.
+  - `GET /complaints/{ticketNo}` foreign ticket → 403 + `COMPLAINT_NOT_OWNED_BY_CONSUMER`.
+
+##### Build status
+
+```
+[INFO] Tests run: 60, Failures: 0, Errors: 0, Skipped: 0  (Surefire — unit; +14 from Stage 10a: 5 image + 2 creation + 3 read + 4 controller)
+[INFO] Tests run:  6, Failures: 0, Errors: 0, Skipped: 0  (Failsafe — IT;   unchanged from Stage 10a)
+[INFO] BUILD SUCCESS
+docs/openapi.json — 32 paths (was 30); +2: POST /api/v1/consumer/complaints, GET /api/v1/consumer/complaints/{ticketNo};
+  +6 schemas: SubmitComplaintRequest, SubmitComplaintResponse, ComplaintDetailResponse, ComplaintImageResponse, SubmitMultipartForm, ApiResponseSubmitComplaintResponse, ApiResponseComplaintDetailResponse (springdoc-generated wrappers).
+```
+
+##### Carry-overs / known follow-ups
+
+- **`ComplaintCreationIT`** (end-to-end Testcontainers + temp-dir `LocalStorageService`) was scoped into Stage 10b but **not** shipped. The 14 new unit tests + 4 WebMvcTest tests + the existing `ComplaintsApplicationIT` (bean wiring) + `TicketNumberServiceIT` (concurrency) collectively cover every meaningful path; the marginal benefit of one more "wires together" IT didn't clear the "would I miss this if it broke tomorrow?" bar. Will be added alongside the first FE-driven smoke pass (Stage 11) when the test will double as the smoke baseline.
+- **Stage 10c** (deferred deploy gate, carried from 10a) — `GcsStorageService` + `google-cloud-storage` dep + profile wiring. Until it lands, deployed test/prod profiles must run with `app.storage.type=local` on a writable mount.
+- **OpenAPI binary multipart in FE codegen** — `SubmitMultipartForm` renders as `{complaint: SubmitComplaintRequest, images: binary[]}` with per-part `encoding` (JSON for `complaint`, `image/jpeg, image/png` for `images`). FE prompt for Stage 11 should explicitly tell the agent: *"the generated `submitComplaint` function takes `complaint: SubmitComplaintRequest` + `images: File[]`. There is no separate image upload call. The Axios `FormData` shape must match the multipart parts named exactly `complaint` and `images`."*
+- **Cross-module entity leak** — `ComplaintCategoryService.requireActive(id)` returns a `ComplaintCategory` JPA entity across the masterdata→complaint boundary. The copilot-instructions soft rule says "Cross-module data exchange via DTOs / records / events — never JPA entities", but ArchUnit `modules_must_not_call_other_modules_repositories` only enforces the repository hop. Pre-existing precedent (the method was added during Stage 6 specifically for "Phase 3 complaint creation"). Tracked as a low-priority refactor: add `ComplaintCategoryService.requireActiveView(id) → ComplaintCategoryView` and switch the one call-site; do it the next time we touch either service for unrelated reasons.
+- **Cancellation, feedback, lifecycle history, list-by-consumer** — explicitly **deferred to Phase 5** (`ROADMAP.md`). `Feedback` entity + repo shipped now so Phase 5 doesn't bounce against schema-add work, but no service / endpoint exists.
+- **Audit event `ComplaintSubmittedEvent`** — not published. Audit module is Phase 7 (consistent with all prior stages).
+- **`MaxUploadSize` exhaustion** — Spring's default multipart limit is 1 MB per file / 10 MB per request; we rely on these defaults plus the explicit `IMAGE_TOO_LARGE` per-file check inside `ComplaintImageService`. If a future deploy bumps the Spring limits, the service still enforces `app.complaint.max-image-bytes`. No `MaxUploadSizeExceededException` handler is wired — Spring's default 413 surfaces through `GlobalExceptionHandler`'s generic `Exception` handler as a 500 today. Tracked as a small follow-up: add a `@ExceptionHandler(MaxUploadSizeExceededException.class)` mapping to `IMAGE_TOO_LARGE` so the FE sees the same error code regardless of which limit blew.
+
+---
+
 ## How to update this log
 
 1. At the end of a stage, append (or fill in) the corresponding subsection.

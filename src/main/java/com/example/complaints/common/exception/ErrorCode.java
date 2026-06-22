@@ -75,6 +75,7 @@ public enum ErrorCode {
     IMAGE_TOO_LARGE                (HttpStatus.PAYLOAD_TOO_LARGE,     "Image exceeds the 1 MB limit"),
     IMAGE_INVALID_TYPE             (HttpStatus.UNSUPPORTED_MEDIA_TYPE,"Only JPEG and PNG images are accepted"),
     IMAGE_NOT_FOUND                (HttpStatus.NOT_FOUND,             "Image not found"),
+    IMAGE_UPLOAD_FAILED            (HttpStatus.INTERNAL_SERVER_ERROR, "Failed to store one or more images"),
 
     // ---------- Feedback ----------
     FEEDBACK_ALREADY_SUBMITTED     (HttpStatus.CONFLICT,              "Feedback has already been submitted for this complaint"),
