@@ -3,6 +3,7 @@ package com.example.complaints.complaint.controller;
 import com.example.complaints.auth.security.AuthenticatedStaff;
 import com.example.complaints.common.dto.ApiResponse;
 import com.example.complaints.complaint.dto.AssignComplaintRequest;
+import com.example.complaints.complaint.dto.CloseComplaintRequest;
 import com.example.complaints.complaint.dto.ComplaintHistoryEntryResponse;
 import com.example.complaints.complaint.dto.ComplaintStaffDetailResponse;
 import com.example.complaints.complaint.dto.MarkDuplicateRequest;
@@ -10,6 +11,7 @@ import com.example.complaints.complaint.dto.ReassignComplaintRequest;
 import com.example.complaints.complaint.dto.RejectComplaintRequest;
 import com.example.complaints.complaint.dto.UpdateSeverityRequest;
 import com.example.complaints.complaint.service.ComplaintAssignmentService;
+import com.example.complaints.complaint.service.ComplaintClosureService;
 import com.example.complaints.complaint.service.ComplaintStaffReadService;
 import com.example.complaints.complaint.service.ComplaintTriageService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -48,6 +50,7 @@ public class StaffComplaintController {
     private final ComplaintAssignmentService assignment;
     private final ComplaintTriageService triage;
     private final ComplaintStaffReadService read;
+    private final ComplaintClosureService closure;
 
     @GetMapping("/{id}")
     @Operation(summary = "Engineer / Admin detail view of a complaint (scope-checked)")
@@ -119,6 +122,17 @@ public class StaffComplaintController {
             @Valid @RequestBody MarkDuplicateRequest req
     ) {
         triage.markDuplicate(caller, id, req);
+        return ResponseEntity.ok(ApiResponse.ok(null));
+    }
+
+    @PostMapping("/{id}/close")
+    @Operation(summary = "Engineer / Admin close-on-behalf of a RESOLVED complaint")
+    public ResponseEntity<ApiResponse<Void>> close(
+            @AuthenticationPrincipal AuthenticatedStaff caller,
+            @PathVariable Long id,
+            @Valid @RequestBody CloseComplaintRequest req
+    ) {
+        closure.close(caller, id, req);
         return ResponseEntity.ok(ApiResponse.ok(null));
     }
 }

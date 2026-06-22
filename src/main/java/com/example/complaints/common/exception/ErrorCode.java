@@ -75,6 +75,7 @@ public enum ErrorCode {
     DUPLICATE_OF_SELF              (HttpStatus.BAD_REQUEST,           "A complaint cannot be marked as a duplicate of itself"),
     DUPLICATE_PARENT_INVALID       (HttpStatus.CONFLICT,              "Parent complaint cannot itself be a duplicate or rejected"),
     NO_ACTIVE_ENGINEER_FOR_DC      (HttpStatus.CONFLICT,              "Target distribution center has no active engineer"),
+    COMPLAINT_NOT_ASSIGNED_TO_TECHNICIAN(HttpStatus.FORBIDDEN,        "This complaint is not assigned to the calling technician"),
 
     // ---------- Image upload ----------
     IMAGE_LIMIT_EXCEEDED           (HttpStatus.CONFLICT,              "Maximum number of images already uploaded"),

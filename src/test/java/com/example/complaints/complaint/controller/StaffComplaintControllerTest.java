@@ -4,11 +4,13 @@ import com.example.complaints.auth.model.UserRole;
 import com.example.complaints.auth.security.AuthenticatedStaff;
 import com.example.complaints.auth.security.JwtFactory;
 import com.example.complaints.complaint.dto.AssignComplaintRequest;
+import com.example.complaints.complaint.dto.CloseComplaintRequest;
 import com.example.complaints.complaint.dto.ComplaintStaffDetailResponse;
 import com.example.complaints.complaint.dto.RejectComplaintRequest;
 import com.example.complaints.complaint.model.ComplaintSeverity;
 import com.example.complaints.complaint.model.ComplaintStatus;
 import com.example.complaints.complaint.service.ComplaintAssignmentService;
+import com.example.complaints.complaint.service.ComplaintClosureService;
 import com.example.complaints.complaint.service.ComplaintStaffReadService;
 import com.example.complaints.complaint.service.ComplaintTriageService;
 import com.example.complaints.common.exception.GlobalExceptionHandler;
@@ -51,6 +53,7 @@ class StaffComplaintControllerTest {
     @MockitoBean ComplaintAssignmentService assignment;
     @MockitoBean ComplaintTriageService triage;
     @MockitoBean ComplaintStaffReadService read;
+    @MockitoBean ComplaintClosureService closure;
     @MockitoBean JwtFactory jwtFactory;
 
     private RequestPostProcessor engineer() {
@@ -97,6 +100,20 @@ class StaffComplaintControllerTest {
                 .andExpect(jsonPath("$.data.ticketNo").value("MH20260600000007"))
                 .andExpect(jsonPath("$.data.status").value("ASSIGNED"))
                 .andExpect(jsonPath("$.data.assignedTechnicianId").value(2));
+    }
+
+    @Test
+    @DisplayName("POST close: delegates to closure service and returns success envelope")
+    void close_success() throws Exception {
+        doNothing().when(closure).close(any(), eq(7L), any(CloseComplaintRequest.class));
+
+        mockMvc.perform(post("/api/v1/staff/complaints/7/close").with(engineer())
+                        .contentType(APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new CloseComplaintRequest(null))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true));
+
+        verify(closure).close(any(), eq(7L), any(CloseComplaintRequest.class));
     }
 }
 

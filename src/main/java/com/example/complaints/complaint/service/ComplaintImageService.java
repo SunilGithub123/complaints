@@ -51,6 +51,24 @@ public class ComplaintImageService {
      * the surrounding transaction can roll back the DB side cleanly.</p>
      */
     public List<ComplaintImage> storeAll(Long complaintId, List<MultipartFile> files) {
+        return store(complaintId, files, ComplaintImageType.COMPLAINT, null);
+    }
+
+    /**
+     * Technician-side variant used in Phase 4 resolution. Same validation + cleanup
+     * semantics as {@link #storeAll}; differs in {@code image_type = RESOLUTION} and the
+     * {@code uploaded_by_user_id} FK being populated from the calling technician.
+     */
+    public List<ComplaintImage> storeResolutionImages(Long complaintId,
+                                                      List<MultipartFile> files,
+                                                      Long technicianUserId) {
+        return store(complaintId, files, ComplaintImageType.RESOLUTION, technicianUserId);
+    }
+
+    private List<ComplaintImage> store(Long complaintId,
+                                       List<MultipartFile> files,
+                                       ComplaintImageType type,
+                                       Long actorUserId) {
         if (files == null || files.isEmpty()) {
             return List.of();
         }
@@ -60,12 +78,12 @@ public class ComplaintImageService {
         List<ComplaintImage> persisted = new ArrayList<>(files.size());
         try {
             for (MultipartFile file : files) {
-                String key = buildKey(complaintId, file.getContentType());
+                String key = buildKey(complaintId, type, file.getContentType());
                 try {
                     StoredObject stored = storage.store(
                             key, file.getInputStream(), file.getContentType(), file.getSize());
                     writtenKeys.add(stored.key());
-                    persisted.add(imageRepo.save(toEntity(complaintId, stored)));
+                    persisted.add(imageRepo.save(toEntity(complaintId, type, actorUserId, stored)));
                 } catch (IOException e) {
                     throw new BusinessException(ErrorCode.IMAGE_UPLOAD_FAILED);
                 } catch (StorageException e) {
@@ -104,19 +122,21 @@ public class ComplaintImageService {
         }
     }
 
-    private static String buildKey(Long complaintId, String contentType) {
+    private static String buildKey(Long complaintId, ComplaintImageType type, String contentType) {
         String ext = "image/png".equals(contentType) ? "png" : "jpg";
-        return String.format(Locale.ROOT, "complaint/%d/COMPLAINT/%s.%s",
-                complaintId, UUID.randomUUID(), ext);
+        return String.format(Locale.ROOT, "complaint/%d/%s/%s.%s",
+                complaintId, type.name(), UUID.randomUUID(), ext);
     }
 
-    private static ComplaintImage toEntity(Long complaintId, StoredObject stored) {
+    private static ComplaintImage toEntity(Long complaintId, ComplaintImageType type,
+                                           Long actorUserId, StoredObject stored) {
         return ComplaintImage.builder()
                 .complaintId(complaintId)
-                .imageType(ComplaintImageType.COMPLAINT)
+                .imageType(type)
                 .storageKey(stored.key())
                 .sizeBytes((int) stored.sizeBytes())
                 .contentType(stored.contentType())
+                .uploadedByUserId(actorUserId)
                 .build();
     }
 }

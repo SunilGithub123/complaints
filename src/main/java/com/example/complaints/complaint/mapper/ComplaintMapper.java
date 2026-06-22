@@ -55,7 +55,7 @@ public class ComplaintMapper {
         );
     }
 
-    private ComplaintImageResponse toImageResponse(ComplaintImage img) {
+    public ComplaintImageResponse toImageResponse(ComplaintImage img) {
         return new ComplaintImageResponse(
                 img.getId(),
                 img.getContentType(),

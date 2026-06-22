@@ -1532,6 +1532,142 @@ docs/openapi.json — 38 → 40 paths (+2 GETs).
 
 ---
 
+### Stage 14 — Phase 4 Stage 3 · Technician resolution + close-on-behalf
+
+**Refs:** TECHNICAL_DESIGN.md §5.4–§5.5 · BRD §3.4 · ROADMAP.md Phase 4 done-criteria.
+
+#### What shipped
+
+Lifecycle is now end-to-end: consumer submit → engineer assign → technician start → resolve
+→ engineer close. The Phase 4 done-criteria are met (modulo SLA scheduler, Stage 15).
+
+REST surface gained four endpoints:
+
+| Method | Path | Role | Transition |
+|---|---|---|---|
+| POST | `/api/v1/technician/complaints/{id}/start` | TECHNICIAN | ASSIGNED → IN_PROGRESS |
+| POST | `/api/v1/technician/complaints/{id}/resolve` | TECHNICIAN | IN_PROGRESS → RESOLVED |
+| POST | `/api/v1/technician/complaints/{id}/images` | TECHNICIAN | none (multipart upload) |
+| POST | `/api/v1/staff/complaints/{id}/close` | ENGINEER/ADMIN | RESOLVED → CLOSED |
+
+Three services:
+
+- **`ComplaintResolutionService`** — `start`, `resolve`, `addResolutionImages`. Per-complaint
+  scope is "I am the assigned technician" (compared via `caller.userId()`); cross-technician
+  ops still live in `ComplaintAssignmentService` from Stage 13. New `ErrorCode`
+  `COMPLAINT_NOT_ASSIGNED_TO_TECHNICIAN` (403) for the foreign-technician case.
+- **`ComplaintClosureService`** — `close` for engineer/admin. Reuses Stage 13's
+  `ComplaintScopeGuard` (engineer DC / admin subdivision).
+- **`ComplaintImageService`** refactored to a private generic `store(...)` core; the existing
+  `storeAll` (consumer COMPLAINT-type) stays as a thin wrapper for backward compatibility, and
+  a new `storeResolutionImages(complaintId, files, technicianUserId)` writes `RESOLUTION`-typed
+  rows with `uploaded_by_user_id` populated from the calling technician. Storage key now
+  encodes the type (`complaint/{id}/RESOLUTION/{uuid}.jpg`).
+
+SLA-breach-reason rule lives in two places, deliberately not extracted to a helper (the
+condition is one line and the two services treat the reason fields differently):
+
+- **resolve**: if `now > slaDeadline` and `req.slaBreachReason` is blank →
+  `SLA_BREACH_REASON_REQUIRED`. Otherwise stores the reason and flips `sla_breached = true`.
+- **close**: if breached AND no reason on file from resolve AND no reason in request →
+  `SLA_BREACH_REASON_REQUIRED`. The "already on file" branch means engineers don't have to
+  re-type the reason at close time if the technician captured it at resolve.
+
+`resolved_at` and `closed_at` populated by their respective services (entity already had
+nullable columns).
+
+State machine: every status change still routes through
+`ComplaintStatusTransition.requireValid(...)` from Stage 12. The validator already encodes
+`ASSIGNED → IN_PROGRESS`, `IN_PROGRESS → RESOLVED`, `RESOLVED → CLOSED` — no edits needed.
+
+Mapper change: `toImageResponse` widened from `private` to `public` so
+`ComplaintResolutionService.addResolutionImages` can return the upload result in the same
+shape consumer-side responses use.
+
+#### End-to-end IT
+
+New `ComplaintFullLifecycleIT` (the one deferred from Stage 13) walks the entire happy path
+against a real Postgres + LocalStorageService temp dir:
+
+1. Consumer submits via `ComplaintCreationService` → asserts `SUBMITTED`.
+2. Engineer assigns via `ComplaintAssignmentService` → asserts `ASSIGNED`.
+3. Technician starts via `ComplaintResolutionService` → asserts `IN_PROGRESS`.
+4. Technician resolves (on-time, no breach reason) → asserts `RESOLVED`, `resolved_at` set,
+   `sla_breached = false`.
+5. Engineer closes → asserts `CLOSED`, `closed_at` set, all FK fields preserved.
+6. Audit trail: 5 history rows in chronological order with the expected
+   `from_status`/`to_status` chain.
+
+Uses the same idempotent-seed pattern as `ComplaintCreationIT` — codes scoped to `-LC-` so
+the two ITs don't collide on the shared masterdata tables.
+
+#### Incidents / decisions
+
+1. **`SubmitComplaintResponse.id` vs `.complaintId`.** First IT pass blew up at compile with
+   `cannot find symbol: id()` — the record field is `complaintId`, not `id`. One-line fix. The
+   wider lesson: the consumer-facing DTO renames `complaint.id` to `complaintId` for clarity at
+   the FE; the staff DTO (`ComplaintStaffDetailResponse`) keeps it as `id` because that's how
+   staff URLs are shaped. Possible future polish to unify, not worth a v1 churn.
+
+2. **`storeAll` signature preserved** for the consumer creation path. Considered changing it to
+   take `(complaintId, files, type, actorUserId)` and updating the single caller, but the
+   existing `ComplaintImageServiceTest` has four cases asserting the COMPLAINT-type behaviour
+   specifically — the extra wrapper avoids that test churn while keeping the new
+   `storeResolutionImages` method intention-revealing. Two callers, two methods is fine; if a
+   third type ever appears we revisit.
+
+3. **SLA-reason-required check is duplicated, not shared.** Two services. The condition is
+   "breached AND no reason supplied AND (for close) no reason already captured at resolve".
+   Sharing it would require either passing five arguments or splitting per-service variants —
+   not a real abstraction win. Documented in both services so the next reader doesn't try to
+   DRY them.
+
+4. **Resolution-image upload accepts `IN_PROGRESS` OR `RESOLVED`.** Decision: allow late
+   additions while the engineer is verifying before close. After `CLOSED` the audit trail is
+   sealed (`COMPLAINT_INVALID_STATE_TRANSITION`).
+
+#### Tests
+
+- `ComplaintResolutionServiceTest` — 6: start happy + wrong-technician unhappy; resolve
+  on-time happy + breached-no-reason unhappy + breached-with-reason flags breach;
+  addResolutionImages wrong-status unhappy.
+- `ComplaintClosureServiceTest` — 4: close on-time happy + breached-no-reason unhappy +
+  breached-reason-on-file (no need to resend) + close-from-IN_PROGRESS rejected.
+- `TechnicianComplaintControllerTest` (`@WebMvcTest`) — 2: start success + resolve blank-notes
+  → VALIDATION_FAILED.
+- `StaffComplaintControllerTest` — +1 close-success case on top of Stage 13.5's cases.
+- `ComplaintFullLifecycleIT` — 1 end-to-end happy path (covers state machine, history,
+  scope checks, FK preservation, timestamps, all in one test as required by the Phase 4
+  done-criteria).
+
+#### Build status
+
+```
+[INFO] Tests run: 105, Failures: 0, Errors: 0, Skipped: 0  (Surefire — unit; +13 from Stage 13.5: 6+4+2+1)
+[INFO] Tests run:   8, Failures: 0, Errors: 0, Skipped: 0  (Failsafe — IT;   +1 ComplaintFullLifecycleIT)
+[INFO] BUILD SUCCESS
+docs/openapi.json — 40 → 44 paths (+4: close, technician start/resolve/images).
+```
+
+#### Carry-overs / known follow-ups
+
+- **Stage 15** (next slice) — `SlaMonitorService` with `@Scheduled(cron = "0 */15 * * * *",
+  zone = "Asia/Kolkata")` that flips `sla_breached = true` on past-deadline complaints that
+  are not yet terminal. Stage 14 already sets the flag at resolve/close time, so the
+  scheduler is the only remaining writer for the "in-flight & overdue" set.
+- **Resolution-image cap** — currently the service-level cap (`maxImages = 3`) is shared
+  between submit and resolution. If a real customer wants more resolution images we'll split
+  the config, but defer until that ask exists.
+- **Re-open / un-cancel** — still out of scope for v1 per BRD §3.4. The state-machine
+  validator refuses these edges; the only edit point if we add them is `ComplaintStatusTransition`.
+- **Domain events** — still not emitted from the resolution/closure paths. Will land alongside
+  the `notification` module in Phase 6/7 (`ComplaintResolvedEvent`, `ComplaintClosedEvent`).
+- **Multipart-JSON gotcha** — the resolution-image endpoint is multipart but takes ONLY image
+  parts (no JSON part), so the orval-multipart-JSON wrapper FE built in Stage 11 is not
+  required here. Plain `FormData` with multiple `images` parts works.
+
+---
+
 ## How to update this log
 
 1. At the end of a stage, append (or fill in) the corresponding subsection.
