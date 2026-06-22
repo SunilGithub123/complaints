@@ -157,7 +157,7 @@ class ConsumerComplaintControllerTest {
     void list_happy_200() throws Exception {
         ConsumerComplaintListItemResponse row = new ConsumerComplaintListItemResponse(
                 1L, "MH20260600000123", 3L, null, ComplaintStatus.RESOLVED, false,
-                null, null, null, null);
+                null, null, null, null, false);
         when(read.listOwned(any(), eq(null), any()))
                 .thenReturn(new PageResponse<>(List.of(row), 0, 20, 1L, 1, List.of("createdAt: DESC")));
 

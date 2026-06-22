@@ -105,13 +105,38 @@ class ComplaintReadServiceTest {
                 .thenReturn(page);
         ConsumerComplaintListItemResponse row = new ConsumerComplaintListItemResponse(
                 7L, "MH20260600000007", 3L, null, ComplaintStatus.RESOLVED, false,
-                null, null, null, null);
-        when(mapper.toConsumerListItem(c)).thenReturn(row);
+                null, null, null, null, false);
+        when(mapper.toConsumerListItem(eq(c), eq(false))).thenReturn(row);
+        when(feedbackRepo.findComplaintIdsWithFeedback(any())).thenReturn(List.of());
 
         PageResponse<ConsumerComplaintListItemResponse> result =
                 service.listOwned(caller, null, PageRequest.of(0, 20));
 
         assertThat(result.content()).containsExactly(row);
+    }
+
+    @Test
+    @DisplayName("listOwned marks feedbackSubmitted=true on rows the batch lookup found")
+    @SuppressWarnings("unchecked")
+    void listOwned_marksFeedbackSubmitted() {
+        Complaint rated = Complaint.builder().id(7L).ticketNo("T7")
+                .consumerMasterId(99L).status(ComplaintStatus.CLOSED).build();
+        Complaint notRated = Complaint.builder().id(8L).ticketNo("T8")
+                .consumerMasterId(99L).status(ComplaintStatus.CLOSED).build();
+        when(complaintRepo.findAll(any(Specification.class), any(PageRequest.class)))
+                .thenReturn(new PageImpl<>(List.of(rated, notRated)));
+        when(feedbackRepo.findComplaintIdsWithFeedback(any())).thenReturn(List.of(7L));
+        ConsumerComplaintListItemResponse ratedRow = new ConsumerComplaintListItemResponse(
+                7L, "T7", 3L, null, ComplaintStatus.CLOSED, false, null, null, null, null, true);
+        ConsumerComplaintListItemResponse notRatedRow = new ConsumerComplaintListItemResponse(
+                8L, "T8", 3L, null, ComplaintStatus.CLOSED, false, null, null, null, null, false);
+        when(mapper.toConsumerListItem(eq(rated), eq(true))).thenReturn(ratedRow);
+        when(mapper.toConsumerListItem(eq(notRated), eq(false))).thenReturn(notRatedRow);
+
+        PageResponse<ConsumerComplaintListItemResponse> result =
+                service.listOwned(caller, null, PageRequest.of(0, 20));
+
+        assertThat(result.content()).containsExactly(ratedRow, notRatedRow);
     }
 
     @Test

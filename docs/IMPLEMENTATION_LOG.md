@@ -2545,6 +2545,45 @@ runs in the affirmative case, and returning `null` defensively keeps the contrac
 
 ---
 
+### Stage 20.2 — FE Stage 13 follow-up (feedback hint on tracking list)
+
+**What shipped**
+
+- `ConsumerComplaintListItemResponse.feedbackSubmitted: boolean` — lets the tracking list
+  render a "Rated" / "Awaiting feedback" hint on each CLOSED row without a per-row probe.
+  Marked `@Schema(requiredMode = REQUIRED)` so orval emits a non-optional field.
+- `FeedbackRepository.findComplaintIdsWithFeedback(Collection<Long> ids)` — one batched
+  IN-list query per page; the service collects the page's complaint IDs, runs the lookup
+  once, and the mapper threads the boolean through. Page size is capped at 100 so the IN
+  list stays bounded. No N+1.
+- New mapper overload `toConsumerListItem(Complaint, boolean)`; the zero-arg version is
+  retained (defaults to `false`) so unrelated callers don't have to change.
+
+**Item not actioned**
+
+- **POST `/feedback` returning the persisted row** — re-verified the response is already
+  `ApiResponse<FeedbackResponse>` carrying the saved row (Stage 19 shipped it this way).
+  FE was discarding the body; no BE change needed. The FE can `setQueryData(...)` from
+  the POST response directly and skip the follow-up `useGetFeedback` refetch.
+
+**Tests added (1 new, total 148 unit + 8 IT)**
+
+- `ComplaintReadServiceTest.listOwned_marksFeedbackSubmitted` — two-row page with one
+  feedback row present; verifies the batch lookup result is mapped onto the correct row
+  and the other row stays `false`. The existing `listOwned_happyPath` was updated to
+  stub `findComplaintIdsWithFeedback` returning empty and to call the new 2-arg mapper.
+- Controller `list_happy_200` updated for the new constructor arity; no new controller
+  test — the contract change is the schema field, which is already covered by the
+  service-level batch test plus the OpenAPI assertion.
+
+**Build**
+
+- `./mvnw verify` green. **148 unit + 8 IT.** OpenAPI **51 paths** (unchanged — no new
+  endpoint). `ConsumerComplaintListItemResponse` schema lists `feedbackSubmitted` under
+  `required`.
+
+---
+
 ## How to update this log
 
 1. At the end of a stage, append (or fill in) the corresponding subsection.

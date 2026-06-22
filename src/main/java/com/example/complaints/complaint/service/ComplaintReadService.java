@@ -22,8 +22,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 
 import static com.example.complaints.complaint.service.ComplaintSpecifications.consumerMasterIdEq;
 import static com.example.complaints.complaint.service.ComplaintSpecifications.statusEq;
@@ -65,6 +67,10 @@ public class ComplaintReadService {
      * Paged tracking list for the verified consumer. Server pins {@code consumerMasterId == me};
      * the only user-supplied filter is {@code status}. Default sort is {@code createdAt,desc}
      * (handled by {@code @PageableDefault} on the controller).
+     *
+     * <p>Stage 20.2: each row carries {@code feedbackSubmitted}. We resolve that via a single
+     * batch query against {@code FeedbackRepository.findComplaintIdsWithFeedback(ids)} rather
+     * than N per-row probes — page size is capped at 100, so the IN list stays bounded.</p>
      */
     @Transactional(readOnly = true)
     public PageResponse<ConsumerComplaintListItemResponse> listOwned(
@@ -74,7 +80,13 @@ public class ComplaintReadService {
                 consumerMasterIdEq(caller.consumerMasterId()),
                 statusEq(status)
         );
-        return PageResponse.from(complaintRepo.findAll(spec, pageable).map(mapper::toConsumerListItem));
+        var page = complaintRepo.findAll(spec, pageable);
+        Set<Long> withFeedback = page.isEmpty()
+                ? Set.of()
+                : new HashSet<>(feedbackRepo.findComplaintIdsWithFeedback(
+                        page.stream().map(Complaint::getId).toList()));
+        return PageResponse.from(page.map(c ->
+                mapper.toConsumerListItem(c, withFeedback.contains(c.getId()))));
     }
 
     /**

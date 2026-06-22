@@ -74,6 +74,10 @@ public class ComplaintMapper {
     }
 
     public ConsumerComplaintListItemResponse toConsumerListItem(Complaint c) {
+        return toConsumerListItem(c, false);
+    }
+
+    public ConsumerComplaintListItemResponse toConsumerListItem(Complaint c, boolean feedbackSubmitted) {
         return new ConsumerComplaintListItemResponse(
                 c.getId(),
                 c.getTicketNo(),
@@ -84,7 +88,8 @@ public class ComplaintMapper {
                 DateUtils.toIst(c.getCreatedAt()),
                 DateUtils.toIst(c.getSlaDeadline()),
                 DateUtils.toIst(c.getResolvedAt()),
-                DateUtils.toIst(c.getClosedAt())
+                DateUtils.toIst(c.getClosedAt()),
+                feedbackSubmitted
         );
     }
 
