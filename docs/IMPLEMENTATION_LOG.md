@@ -690,6 +690,7 @@ complaint submit PWA), which is BE-led — first slice shipped as Stage 9 below.
 
 ### Stage 9 · Backend `auth` (consumer side) — OTP send/verify — ✅ 2026-06-22
 
+
 First Phase 3 ship. Adds the public, password-less consumer surface that gates every
 future `/api/v1/consumer/**` endpoint with a short-lived verification JWT.
 
@@ -832,6 +833,89 @@ docs/openapi.json — 30 paths (was 28 effective at Stage 8b: GET+PUT share /sta
 - **OpenAPI spec-drift CI guard** — still tracked from Stage 3 / Stage 6 / Stage 7. Now
   doubly valuable: an unintended change to either OTP endpoint's response shape would
   silently break the FE's `pnpm api:gen` output.
+
+---
+
+### Stage 10 · Backend `storage` + `complaint` modules
+
+Stage 10 is the largest Phase 3 slice — multipart submit + image upload against a
+swappable storage backend. Split into two ships to keep each diff reviewable and each
+deploy green:
+
+- **Stage 10a** — `storage` interface + `LocalStorageService`, `TicketNumberService`. **✅ 2026-06-22.**
+- **Stage 10b** — `complaint` entities + `ComplaintCreationService` (single multipart endpoint that accepts JSON form-part + image parts in one request) + consumer-facing detail/list endpoints. **⏳ pending.**
+
+---
+
+#### Stage 10a · `storage` module + `TicketNumberService` — ✅ 2026-06-22
+
+> Foundation slice — no new HTTP endpoints, no OpenAPI delta. Lays down the two pieces
+> Stage 10b will compose: a pluggable binary store and a contention-safe ticket-number
+> minter.
+
+##### Scope delivered
+
+**`storage` module** (new top-level package):
+
+- `StorageService` (interface) — `store(key, InputStream, contentType, sizeBytes) → StoredObject`, `delete(key)`, `signedReadUrl(key, ttl)`. Intentionally small per the design rule "add the abstraction the second time you need it" — only the surface Stage 10b will call. Implementations must close the input stream and be safe to call concurrently.
+- `StoredObject` (record) — `(key, contentType, sizeBytes)` — what the caller persists alongside the `complaint_image` row.
+- `StorageProperties` — `record` bound to `app.storage.*` via `@ConfigurationProperties`. Fields: `Type {LOCAL, GCS}`, `localPath`, `gcsBucket`, `signedUrlTtlSeconds` (default 900s = 15min, matches FRONTEND_DESIGN.md image-view contract). Defaults applied in the canonical constructor so missing properties fail-soft.
+- `LocalStorageService` — `@ConditionalOnProperty("app.storage.type" = "local", matchIfMissing = true)`. Writes to `${app.storage.local-path}/<key>`, creates parent dirs on the fly. `signedReadUrl` returns the raw `file://` URI — dev only; documented on the interface that `local` must not be deployed.
+  - **Path-traversal hardening:** `resolveSafe` normalises the resolved path and rejects anything that escapes the root, even though callers always generate keys server-side from UUIDs. Defence-in-depth covered by a unit test (`store_rejectsEscapingKey`).
+- `StorageException` — plain `RuntimeException`. Storage failures are infrastructure errors, not business-rule violations, so they bubble through to the generic `Exception` handler in `GlobalExceptionHandler` → `500 INTERNAL_ERROR`. No new `ErrorCode` added — when Stage 10b needs a user-visible "image upload failed", we'll introduce one then (current rule of thumb: add the second time it's needed).
+- **No `GcsStorageService` yet** — `google-cloud-storage` is not on the classpath; wiring it adds a non-trivial dependency surface and Stage 10b can ship green against `local` everywhere (dev + test profiles override `app.storage.type=local` for the IT). Deferred to **Stage 10c** alongside MSG91 wiring; tracked below.
+
+**`complaint` module** (new top-level package, minimal Stage-10a surface):
+
+- `ComplaintProperties` (`@ConfigurationProperties("app.complaint")`) — `defaultSlaHours`, `maxImages`, `maxImageBytes`, `ticketPrefix`. Defaults match `application.yml`: 24h / 3 images / 1 MB / "MH".
+- `ComplaintSequence` (entity) — maps to the existing `complaint_sequence` table from `V1.0__init_schema.sql` (no Flyway migration this stage; hard-rule #5 honoured).
+- `ComplaintSequenceRepository` — plain `JpaRepository`. The service uses `EntityManager` directly for the native SQL; the repo exists for schema integration and as the deletion handle in tests.
+- `TicketNumberService` — issues `<prefix><yyyymm><8-digit-seq>` (e.g. `MH202606 00000123`) per TECHNICAL_DESIGN.md §4.
+  - `@Transactional(propagation = REQUIRES_NEW)` so the row-level lock from the upsert is released the moment the number is minted — long-running submit transactions in Stage 10b will never serialise the whole month behind their commit window.
+  - **PG advisory transaction lock** on `hashtext('complaint_seq_' || yyyymm)` — held for the duration of the call. Defence-in-depth: even if a future caller bypasses the upsert path, the lock prevents duplicate numbers.
+  - **Atomic upsert pattern:** `INSERT (yyyymm, 2) ON CONFLICT DO UPDATE SET next_value = next_value + 1 RETURNING next_value - 1`. Fresh month → row at 2, returns 1. Existing month → bump, returns old value. Single round-trip, no read-then-write race.
+  - IST `yyyymm` comes from `DateUtils.currentYearMonthIst()` — hard-rule #1 honoured.
+
+##### Incidents fixed during implementation
+
+| # | Symptom | Root cause | Fix |
+|---|---------|-----------|-----|
+| 1 | All ITs (including pre-existing `ComplaintsApplicationIT`, `UserAccountRepositoryIT`, `OpenApiExportIT`) failed context load with `Schema validation: wrong column type encountered in column [year_month] in table [complaint_sequence]; found [bpchar (Types#CHAR)], but expecting [varchar(6) (Types#VARCHAR)]`. The new IT broke Spring-Boot's schema validation for every other IT sharing the bean cache. | The schema declares `year_month CHAR(6) PRIMARY KEY` (Postgres `bpchar`). The first attempt mapped it with `@Column(length = 6)`, which Hibernate translates to `VARCHAR(6)` regardless of the column existing as `CHAR(6)`. Setting `columnDefinition = "char(6)"` did **not** help — `columnDefinition` only affects schema generation, not Hibernate's runtime type expectation, so schema validation still asserted `VARCHAR`. | Annotated the `String yearMonth` field with `@JdbcTypeCode(SqlTypes.CHAR)` (Hibernate 6/JPA 3.1). This pins the JDBC type at the runtime mapping layer, matching Postgres's `bpchar`. Schema validation now passes and the entity round-trips cleanly. Documented the gotcha inline so the next person mapping a `CHAR(N)` column doesn't repeat the loop. |
+| 2 | Initial unit test for `TicketNumberService` mocked `EntityManager.createNativeQuery(...)` with a single `Query` instance for both the lock and the upsert calls, which made `verify(query, times(2)).getSingleResult()` ambiguous about which call was the lock vs the upsert. | Mockito returns the same mock for repeated calls unless told otherwise — collapses both queries into one mock. | `createNativeQuery(anyString())` answer now branches on the SQL substring (`pg_advisory_xact_lock` vs the upsert) and returns distinct `Query` mocks. Both `lockQuery.getSingleResult()` and `upsertQuery.getSingleResult()` are then independently verifiable. |
+
+##### Tests added
+
+Minimum-test policy: 1 happy + 1 unhappy per method, plus an IT for the property Mockito can't cover (real PG advisory lock under contention).
+
+- `storage/LocalStorageServiceTest` — 4 unit tests:
+  - `store` writes bytes under the resolved key and returns size.
+  - `store` rejects keys that escape the storage root (`../` traversal).
+  - `delete` is idempotent for missing keys.
+  - `signedReadUrl` returns a `file://` URL pointing at the stored object.
+- `complaint/service/TicketNumberServiceTest` — 2 unit tests (format only; lock branching covered in IT):
+  - Formats `MH<yyyymm><8-digit>` with the sequence returned by the upsert.
+  - Zero-pads small sequence numbers to 8 digits.
+- `complaint/service/TicketNumberServiceIT` (`@SpringBootTest` + Testcontainers Postgres 16) — 2 ITs:
+  - Sequential calls return strictly increasing numbers (`00000001`, `00000002`, `00000003`) sharing the same `MH<yyyymm>` prefix.
+  - **Contention path:** 16 threads × 4 calls = 64 concurrent `nextTicketNumber()` invocations against a real Postgres yield 64 unique numbers covering the range `1..64` with no gaps and no duplicates. This is the test the advisory lock exists for.
+
+##### Build status
+
+```
+[INFO] Tests run: 46, Failures: 0, Errors: 0, Skipped: 0  (Surefire — unit; +6 from Stage 9: 4 LocalStorageService + 2 TicketNumberService)
+[INFO] Tests run:  6, Failures: 0, Errors: 0, Skipped: 0  (Failsafe — IT;   +2 from Stage 9: TicketNumberServiceIT sequential + contention)
+[INFO] BUILD SUCCESS
+docs/openapi.json — unchanged at 30 paths (Stage 10a ships no endpoints).
+```
+
+##### Carry-overs / known follow-ups
+
+- **Stage 10b** (next slice) — `complaint` entities (`Complaint`, `ComplaintImage`, `ComplaintHistory`, `Feedback` model), `ComplaintCreationService`, `ComplaintImageService`, **single multipart `POST /api/v1/consumer/complaints`** (JSON form-part + image parts in one request — confirmed contract; *do not* introduce a separate `POST /{ticketNo}/images` endpoint), `GET /api/v1/consumer/complaints/{ticketNo}` for the confirmation/detail view. `VerifiedConsumer` via `@AuthenticationPrincipal` finally exercised end-to-end.
+- **Stage 10c** (deferred deploy gate) — `GcsStorageService` impl + `google-cloud-storage` dependency + `application-test.yml`/`application-prod.yml` profile wiring + smoke test against a real GCS bucket. Until this lands, test/prod profiles must run with `app.storage.type=local` and a writable `app.storage.local-path` mounted on the VM. Bundled with the deferred MSG91 wiring under the same "Phase 3 external integrations" umbrella.
+- **`StorageException` → user-visible `ErrorCode`** — not introduced this stage (no caller yet). Add `IMAGE_UPLOAD_FAILED` or similar when Stage 10b discovers the need from the FE contract.
+- **FE contract reminder** — when Stage 10b's FE counterpart starts, surface in the FE prompt: *"complaint submit is a single `multipart/form-data` POST: one `application/json` part named `complaint` plus 0–3 image parts named `images`. There is no separate image-upload endpoint."* (User directive captured 2026-06-22.)
+- **`google-cloud-storage` CVE check** — defer until the dep is actually added in Stage 10c; running `validate_cves` against a non-existent dep is busywork.
+- **`@DataJpaTest` for `ComplaintSequenceRepository`** — skipped; the repo has zero derived queries (the service uses native SQL). Same reasoning as the Stage 1 carry-over.
 
 ---
 

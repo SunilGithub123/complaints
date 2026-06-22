@@ -17,7 +17,9 @@ import java.util.TimeZone;
 @ConfigurationPropertiesScan(basePackages = {
         "com.example.complaints.config",
         "com.example.complaints.auth.security",
-        "com.example.complaints.auth.service"
+        "com.example.complaints.auth.service",
+        "com.example.complaints.complaint",
+        "com.example.complaints.storage"
 })
 public class ComplaintsApplication {
 
