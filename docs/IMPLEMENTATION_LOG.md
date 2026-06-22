@@ -1832,6 +1832,115 @@ picker actually uses (id, employeeId, fullName), so the swap is local to the pic
 
 ---
 
+### Stage 15 — Phase 4 Stage 4 · SLA breach scheduler
+
+**Refs:** TECHNICAL_DESIGN.md §1.6 · ROADMAP.md Phase 4 · BRD §3.5.
+
+#### What shipped
+
+New `SlaMonitorService` with one method, one scheduled trigger:
+
+```java
+@Scheduled(cron = "0 */15 * * * *", zone = "Asia/Kolkata")
+@Transactional
+public void markBreached() { … }
+```
+
+Every 15 minutes (at :00 / :15 / :30 / :45 IST) the sweep finds open complaints whose
+`sla_deadline` has elapsed but whose `sla_breached` is still `false`, flips the flag, and
+writes a system-driven history row (`from_status == to_status`, `changed_by_user_id = null`,
+`note = "SLA breached"`). The FE timeline already renders "by system" for null-actor rows
+(FE Stage 12 handoff confirmed) so no FE work was needed for this slice.
+
+New repo query (derived):
+
+```java
+List<Complaint> findBySlaBreachedFalseAndStatusInAndSlaDeadlineBefore(
+        Collection<ComplaintStatus> statuses, Instant now);
+```
+
+Reuses the `ComplaintQueryService.OPEN_STATUSES` constant (`SUBMITTED`, `ASSIGNED`,
+`IN_PROGRESS`) so terminal rows are never touched. The Stage 14 resolve / close paths
+already flip the flag synchronously when they detect a past-deadline complaint; this
+scheduler covers the "still in flight, technician hasn't touched it" segment.
+
+`@EnableScheduling` was already on `ComplaintsApplication` from Stage 9's `OtpCleanupJob`.
+
+#### Why one big transaction, not per-row REQUIRES_NEW
+
+If a complaint is concurrently mutated by an engineer / technician at sweep time, Hibernate's
+`@Version` check fires and the whole tick rolls back. Per-row `REQUIRES_NEW` would isolate
+the failure but add complexity. For a v1 flag whose role is informational (UI badge), 15 min
+delay until next tick is fine — there is no time-critical SLA action gated on this flag.
+Documented in service Javadoc so a future contributor sees the trade-off. If contention
+shows up in prod metrics, split per-row then.
+
+#### State machine
+
+The breach flag is orthogonal to `ComplaintStatus` — flipping it is not a status transition,
+so the sweep deliberately does **not** consult `ComplaintStatusTransition.requireValid(...)`.
+The history row carries `from_status == to_status` (same pattern as Stage 13's severity /
+reassignment annotations).
+
+#### Incidents / decisions
+
+1. **Scheduled-task ERROR log noise during long-running ITs.** The existing
+   `OtpCleanupJob` (cron `0 0 * * * *` — top of every hour) and now `SlaMonitorService`
+   (every 15 min) both fire inside Testcontainers ITs that happen to straddle a boundary,
+   sometimes logging an "Unexpected error occurred in scheduled task" via Spring's default
+   `TaskUtils$LoggingErrorHandler`. **Tests still pass** — the failure is per-tick, not
+   per-test. Pre-existing for `OtpCleanupJob` (visible since Stage 9); now applies to two
+   beans. Not chasing in this slice; if it becomes a flake source we'll either:
+   - register a custom `ErrorHandler` that downgrades to `log.warn` for known races, or
+   - disable schedulers in test profile via `@MockitoBean(name = "scheduledAnnotationProcessor")`.
+2. **No domain event published.** A future `notification` module will want a
+   `SlaBreachedEvent`, but with no listener in the codebase today emitting it would be dead
+   code. Adding it is one line when the listener lands.
+
+#### Tests
+
+- `SlaMonitorServiceTest` — 2 tests:
+  - Happy: two overdue rows flipped, two system-actor history rows written with
+    `from_status == to_status` and `note` containing "SLA breached".
+  - Empty sweep: no overdue rows → no history writes (the early-return path).
+
+No IT — the derived-name repo query is a thin Spring Data convention; if the name were
+wrong it'd fail boot (caught by `ComplaintsApplicationIT`). The behaviour layer is fully
+mockable.
+
+#### Build status
+
+```
+[INFO] Tests run: 118, Failures: 0, Errors: 0, Skipped: 0  (Surefire — unit; +2 from Stage 14.6)
+[INFO] Tests run:   8, Failures: 0, Errors: 0, Skipped: 0  (Failsafe — IT;   unchanged)
+[INFO] BUILD SUCCESS
+docs/openapi.json — still 46 paths (scheduler has no REST surface).
+```
+
+#### Phase 4 status
+
+**Phase 4 lifecycle is feature-complete.** Done-criteria from ROADMAP.md:
+
+> End-to-end happy path: consumer submits → engineer assigns → technician starts → resolves
+> → closes → consumer can see CLOSED status.
+
+All five transitions live, exercised by `ComplaintFullLifecycleIT`, plus the scheduler now
+flags long-overdue complaints automatically. Stage 16 (paged list / search via Specifications)
+is the remaining slice before Phase 4 is closed completely — it's polish on top of a
+shipped lifecycle, not a missing feature.
+
+#### Carry-overs / known follow-ups
+
+- **`SlaBreachedEvent`** — emit when the `notification` module's listener lands (Phase 6/7).
+- **Per-row `REQUIRES_NEW`** — only if contention becomes visible in prod metrics.
+- **Test-profile scheduler suppression** — wire an `app.scheduling.enabled=false` toggle if
+  the ERROR log noise becomes a flake source.
+- **Cron tunable** — the 15-min cadence is hard-coded in the annotation. If we want
+  environment-specific cadence (dev vs prod) we'd promote it to a `@ConfigurationProperties`
+  binding (`app.complaint.sla-sweep-cron`). Defer until that ask exists.
+
+---
+
 ## How to update this log
 
 1. At the end of a stage, append (or fill in) the corresponding subsection.
