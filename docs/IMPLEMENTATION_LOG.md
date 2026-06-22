@@ -1668,6 +1668,170 @@ docs/openapi.json — 40 → 44 paths (+4: close, technician start/resolve/image
 
 ---
 
+### Stage 14.5 — Phase 4 Stage 3.5 · Staff directory read
+
+**Refs:** FE Stage 12 carry-over · TECHNICAL_DESIGN.md §5.2.
+
+#### What shipped
+
+Two `GET` endpoints so the FE can resolve staff user-ids into human-readable names:
+
+- `GET /api/v1/staff/users/{id}` → single `StaffDirectoryEntryResponse`
+- `GET /api/v1/staff/users?ids=1,2,3` → batch list (hard cap 50, unknown ids silently dropped)
+
+New record `auth.dto.StaffDirectoryEntryResponse(userId, employeeId, fullName, role,
+subdivisionId, distributionCenterId, enabled)` — deliberately narrower than the existing
+`StaffSummaryResponse` (the "me" shape):
+
+- **Drops** `passwordResetRequired` and `notificationsPushEnabled` (personal flags no other
+  staff member should see).
+- **Keeps** `subdivisionId` / `distributionCenterId` so the FE technician picker can filter
+  client-side without an extra round-trip.
+- **Adds** `enabled` so the FE can render historical-but-now-disabled actors with a muted
+  state ("by Asha Patel (disabled)").
+
+`StaffLookupService` gained `getDirectoryEntry(Long)` (throws `STAFF_NOT_FOUND` on miss) and
+`getDirectoryEntries(Collection<Long>)` (batch, dropping unknowns silently — a history row
+referencing a hard-deleted user shouldn't 404 the whole timeline; we don't hard-delete today
+but the contract is robust to it).
+
+New `StaffDirectoryController` at `/api/v1/staff/users` — no role split; the existing
+`/api/v1/staff/**` → `.authenticated()` matcher in `SecurityConfig` is the gate. Engineers,
+admins, and technicians may all resolve names (the FE technician mobile flow will need this
+too once it renders "assigned by Engineer X").
+
+#### Why a new DTO instead of reusing `StaffSummaryResponse`
+
+Reusing the "me" shape would leak `passwordResetRequired` (a security-relevant personal flag)
+to every other staff member who renders a history row. The cost of a second record is one
+file; the cost of the leak is non-zero and only surfaces at audit. Easy call.
+
+#### Why a batch endpoint up-front (not strict "second time you need it")
+
+A single complaint detail screen typically renders 4–6 history rows + 1 technician + 1
+engineer = up to 8 distinct user ids. 8 round-trips per view is silly; TanStack dedups but
+doesn't batch. Twenty extra lines of service code and one URL parameter avoid the issue
+entirely. Documented inline so the choice is auditable.
+
+#### Tests
+
+- `StaffLookupServiceDirectoryTest` — 4 tests: single happy, single not-found, batch drops
+  unknown ids, empty/null input short-circuits without a DB hit.
+- `StaffDirectoryControllerTest` (`@WebMvcTest`) — 3 tests: single GET success (also asserts
+  `passwordResetRequired` field is **not** in the response — guards the leak-prevention
+  decision), single GET 404, batch GET success.
+
+No IT — pure read path on top of an existing repository method (`findById`, `findAllById`).
+
+#### Build status
+
+```
+[INFO] Tests run: 112, Failures: 0, Errors: 0, Skipped: 0  (Surefire — unit; +7 from Stage 14: 4 service + 3 controller)
+[INFO] Tests run:   8, Failures: 0, Errors: 0, Skipped: 0  (Failsafe — IT;   unchanged)
+[INFO] BUILD SUCCESS
+docs/openapi.json — 44 → 46 paths (+2 GETs).
+```
+
+#### Carry-overs / known follow-ups
+
+- **Stage 15** (next slice) — SLA breach scheduler. The directory endpoint will become useful
+  there too: scheduler-written history rows have `changedByUserId = null`, which the FE
+  already handles ("by system") — but engineer / technician columns in Stage 16's list view
+  will lean on the batch endpoint for name resolution.
+- **Caching** — not added in this slice. The directory rows are stable (name / role / scope
+  changes are rare) so a Caffeine cache by id with a short TTL is the obvious next step if
+  profiling shows the FE hammering this on every screen. Deferring until we have signal.
+- **`/api/v1/staff/users` discoverability** — the URL collides conceptually with the
+  admin-side `/api/v1/admin/staff` (which manages full lifecycle). Kept distinct because
+  the admin one requires ADMIN role and exposes the full edit surface; the directory one is
+  read-only and authenticated-only. Worth a brief comment in the FE client.
+
+---
+
+### Stage 14.6 — Phase 4 Stage 3.6 · Directory search (picker hotfix)
+
+**Refs:** FE Stage 12.1 carry-over · TECHNICAL_DESIGN.md §5.2.
+
+#### What shipped
+
+FE Stage 12.1 surfaced a real block: the `TechnicianPicker` was calling ADMIN-only
+`/api/v1/admin/staff` to enumerate technicians in a DC, so an ENGINEER opening AssignDialog
+got a 403 — and engineer-is-the-assigner is the common case. This patch fixes that by widening
+the Stage 14.5 directory endpoint with filter + paging.
+
+Same URL (`GET /api/v1/staff/users`), disambiguated by Spring's `params` attribute:
+
+| Variant | Returns |
+|---|---|
+| `?ids=1,2,3` | `List<StaffDirectoryEntryResponse>` (Stage 14.5 batch) |
+| `?role=…&distributionCenterId=…&active=…&page=…&size=…` | `PageResponse<StaffDirectoryEntryResponse>` |
+
+All filters optional. Reuses the existing `UserAccountRepository.search()` JPQL query
+(subdivision-scoped, role/dc/enabled optional) — no new repository surface.
+
+**Scope rules (server-enforced):**
+
+- **ADMIN**: results pinned to admin's subdivision. `distributionCenterId` may further narrow.
+  If the admin passes a DC outside their subdivision, the underlying query returns empty (DC
+  IDs are not secret — no need to 403-probe-detect them).
+- **ENGINEER / TECHNICIAN**: results pinned to caller's DC. A supplied `distributionCenterId`
+  that differs from the caller's DC → `403 FORBIDDEN`. Deliberate — don't silently rewrite,
+  the FE should know the request was overruled (helps catch bad filter wiring early).
+
+The narrower `StaffDirectoryEntryResponse` is returned (same shape as the single / batch GETs)
+so cross-DC personal flags never leak.
+
+#### Why widen the existing endpoint instead of adding `/staff/technicians`
+
+A second URL (`/staff/technicians?distributionCenterId=…`) would force a third later
+(`/staff/engineers?subdivisionId=…`), and so on — the picker's filter set grows with every new
+role-aware screen. One paginated search endpoint with optional role/DC/active filters covers
+all of them and stays consistent with the rest of the directory surface. The
+`params = "ids"` trick on `@GetMapping` is the standard Spring MVC way to share a path
+between batch and search variants.
+
+#### Tests
+
+- `StaffLookupServiceDirectoryTest` — 3 new tests on top of Stage 14.5's 4:
+  - Engineer caller is pinned to own DC (captures the actual DC argument passed to the repo
+    to prove the request param was overridden by caller's DC).
+  - Engineer requesting a different DC → 403 FORBIDDEN.
+  - Admin passes an explicit DC and it flows through to the repo query.
+- `StaffDirectoryControllerTest` — 1 new test: paged search returns `PageResponse` envelope
+  with the expected content. The `params` dispatch (batch vs search) is verified by the
+  pre-existing `getMany_success` test continuing to pass.
+
+No IT — the new method is pure delegation to an existing repo query already covered by
+`UserAccountRepositoryIT`.
+
+#### Build status
+
+```
+[INFO] Tests run: 116, Failures: 0, Errors: 0, Skipped: 0  (Surefire — unit; +4 from Stage 14.5)
+[INFO] Tests run:   8, Failures: 0, Errors: 0, Skipped: 0  (Failsafe — IT;   unchanged)
+[INFO] BUILD SUCCESS
+docs/openapi.json — still 46 paths (same URL, second handler signature added to the existing path).
+```
+
+#### FE migration note
+
+The current TechnicianPicker calls ADMIN-only `useListStaff` → migrate to the new directory
+search with `{ role: 'TECHNICIAN', distributionCenterId: <complaint.dcId or caller's dc> }`
+for engineers, or `{ role: 'TECHNICIAN', distributionCenterId: <picked DC> }` for admin
+cross-DC reassignment. Same response shape as the existing `useListStaff` for the fields the
+picker actually uses (id, employeeId, fullName), so the swap is local to the picker.
+
+#### Carry-overs / known follow-ups
+
+- **Stage 15** (next slice) — SLA breach scheduler. Unchanged from earlier plan.
+- **Search index polish** — if a future requirement adds free-text search (by name /
+  employeeId) we'd add a `q` param + a `LIKE`-ed clause. Defer until that ask exists.
+- **Cross-subdivision admin queries** — explicitly out of scope; if multi-subdivision oversight
+  ever lands (see ROADMAP §"Future considerations"), this endpoint's admin branch is the
+  natural place to widen.
+
+---
+
 ## How to update this log
 
 1. At the end of a stage, append (or fill in) the corresponding subsection.
