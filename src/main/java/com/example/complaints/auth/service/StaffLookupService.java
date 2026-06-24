@@ -75,6 +75,18 @@ public class StaffLookupService {
                 .map(this::toView);
     }
 
+    /**
+     * Stage 21.2 — locate the active admin for a subdivision. Used by the feedback ≤2
+     * admin-escalation push per contract §5. Returns empty when the subdivision has no
+     * active admin (rare; bootstrap admin always exists in practice).
+     */
+    @Transactional(readOnly = true)
+    public Optional<StaffScopeView> findActiveAdminForSubdivision(Long subdivisionId) {
+        return users.findFirstByRoleAndSubdivisionIdAndEnabledTrue(
+                        UserRole.ADMIN, subdivisionId)
+                .map(this::toView);
+    }
+
     private StaffScopeView toView(UserAccount u) {
         return new StaffScopeView(u.getId(), u.getRole(),
                 u.getSubdivisionId(), u.getDistributionCenterId(), u.isEnabled());

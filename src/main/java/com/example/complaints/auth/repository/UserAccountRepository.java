@@ -30,6 +30,9 @@ public interface UserAccountRepository extends JpaRepository<UserAccount, Long> 
 
     Optional<UserAccount> findFirstByRoleAndDistributionCenterIdAndEnabledTrue(UserRole role, Long distributionCenterId);
 
+    /** Stage 21.2 — locate the active admin for a subdivision (used by feedback ≤2 admin escalation). */
+    Optional<UserAccount> findFirstByRoleAndSubdivisionIdAndEnabledTrue(UserRole role, Long subdivisionId);
+
     /**
      * Paged staff search scoped to a single subdivision. {@code role}, {@code distributionCenterId},
      * and {@code enabled} are all optional filters — pass {@code null} to skip.

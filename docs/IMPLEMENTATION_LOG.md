@@ -3059,6 +3059,175 @@ docs/openapi.json — 52 → 56 paths (+4: consumer + staff devices, POST and DE
   bug exploiting the partial-unique semantics, that's the moment to add the slice IT.
 
 
+### Stage 21.2 — Push provider + AFTER_COMMIT listeners — ✅ 2026-06-25
+
+> Closes the second half of Stage 21. Adds a `PushService` abstraction (with the dev/test
+> `ConsolePushService` impl) and nine `@TransactionalEventListener(phase = AFTER_COMMIT)`
+> methods that turn the Stage 20 `ComplaintEvent` hierarchy into push notifications per
+> the frozen contract §5. Registering a device today now actually receives a push when a
+> complaint touches you — end to end through the dev profile.
+
+#### Scope delivered
+
+**Provider abstraction** (`notification.service`)
+
+- `PushService` interface — single method `send(DeviceToken target, PushPayload payload)`.
+  Implementations must not log the `pushToken` or `body` per contract §6.2; the caller
+  (the listener) owns per-recipient failure isolation per §6.1.
+- `ConsolePushService` — `@Profile({"dev","test"})` +
+  `@ConditionalOnProperty("app.push.provider"="console", matchIfMissing=true)`. Emits one
+  `INFO` log line per send with the §6.2 whitelist: `event`, `ticketNo`, `complaintId`,
+  `recipientUserId`, `consumerMasterId`, `platform`, `deviceId`, `outcome=SENT`. Never
+  touches the network.
+- **`FcmPushService` not shipped this slice.** Deferred to **Stage 21.3** until
+  GCP / FCM service-account credentials are provisioned (mirrors the
+  Stage 10a → 10c deferral pattern for GCS storage). Until then the `prod` profile cannot
+  send real pushes — documented in the carry-overs below.
+
+**Payload rendering** (`notification.service`)
+
+- `PushType` enum — nine values, one per `ComplaintEvent` subtype, matching the contract
+  §4 / §5 `type` strings the FE routes on.
+- `PushPayload` record — frozen §4 v1 wire shape: `type`, `ticketNo`, `complaintId`,
+  `title`, `body`, **`eventOccurredAt`** (server clock at `AFTER_COMMIT`, captured by the
+  factory per the §4 delta), `schemaVersion=1`. Includes `toFcmDataFrame()` that renders
+  the FCM all-string data frame.
+- `PushPayloadFactory` — one builder per event subtype. Templates are English-only per
+  FE sign-off §9.1; localisation moves to the Stage 22 inbox row (bump to
+  `schemaVersion=2` then). Titles / bodies kept terse and PII-free except for the
+  rejection reason on `COMPLAINT_REJECTED` (consumer needs it to understand the rejection).
+
+**Listener** (`notification.service`)
+
+- `ComplaintNotificationListener` — nine
+  `@TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)` methods, exactly
+  the §5 recipient table:
+  - `onSubmitted` → active engineer for the receiving DC.
+  - `onAssigned` → assigned technician; **cc engineer only when severity = HIGH** (per §5
+    "avoid noise on LOW/MEDIUM").
+  - `onReassigned` → new technician + previous technician + engineer.
+  - `onResolved` → consumer + engineer.
+  - `onClosed` → consumer (nudges to feedback).
+  - `onSlaBreached` → assigned technician + assigned engineer. **Once per breach**
+    inherited from `SlaMonitorService` only publishing on the `false → true` transition;
+    zero local de-dup state required.
+  - `onFeedback` → assigned technician + engineer; **admin escalation on rating ≤ 2** via
+    a two-hop `DC → subdivision → admin` lookup.
+  - `onCancelled` → engineer of the DC (cancellation is `SUBMITTED`-only, so there's
+    never an assigned technician in v1 — documented inline).
+  - `onRejected` → consumer; rejection reason inlined into the body.
+- Fan-out helpers `fanOutStaff(userId, payload)` / `fanOutConsumer(consumerMasterId,
+  payload)` query active device tokens via the new repo methods and route each through
+  `sendIsolated(...)` which try/catches every `push.send(...)` call. Per §6.1 a single
+  bad device never blocks the rest of the fan-out — verified by test.
+
+**Repository additions**
+
+- `DeviceTokenRepository.findByUserIdAndActiveTrue(Long)` and
+  `findByConsumerMasterIdAndActiveTrue(Long)` — return `List<DeviceToken>` (one principal
+  can register multiple devices: phone + tablet).
+- `UserAccountRepository.findFirstByRoleAndSubdivisionIdAndEnabledTrue(...)` — used by
+  the admin-on-low-rating escalation path.
+
+**Cross-module service hops**
+
+- `StaffLookupService.findActiveAdminForSubdivision(Long subdivisionId)` — mirrors the
+  existing `findActiveEngineerForDc(...)` for the feedback escalation.
+- Existing `DistributionCenterService.getSubdivisionId(Long)` reused for the
+  DC → subdivision hop.
+- All cross-module calls go through `*Service` interfaces, never another module's
+  repository — ArchUnit `PackageBoundaryTest` still green (5/5).
+
+#### Incidents fixed during implementation
+
+_None of note._ The Stage 20 event records had every field the listener needed
+(thanks to Stage 20's "primitive IDs only, no JPA entities" design), so no event-shape
+changes were required this stage. ArchUnit passed first try because the new
+service-to-service hops (`notification.service` → `auth.service.StaffLookupService` and
+→ `masterdata.service.DistributionCenterService`) are exactly what the boundary rules
+explicitly allow.
+
+#### Tests added (12 new — total 175 unit + 8 IT)
+
+`notification/service/ComplaintNotificationListenerTest` — covers each of the 9
+listeners plus the two cross-cutting concerns flagged by §5 / §6.1:
+
+- `onSubmitted_findsEngineerForDc` — DC → engineer lookup + fan-out.
+- `onAssigned_lowSeverity_noEngineerCc` — LOW / MEDIUM: tech only, engineer never queried.
+- `onAssigned_highSeverity_engineerCcd` — HIGH: tech + engineer both notified;
+  `ArgumentCaptor` asserts the payload `type=COMPLAINT_ASSIGNED` + body contains "HIGH".
+- `onReassigned_threeRecipients` — new tech + previous tech + engineer all fetched.
+- `onResolved_consumerAndEngineer` — both principals' device lists fetched.
+- `onClosed_consumerOnly` — consumer fan-out only; **asserts no staff lookup** (would
+  be a bug per §5).
+- `onSlaBreached_techAndEngineer` — both staff principals notified.
+- `onFeedback_highRating_noAdminEscalation` — rating > 2: admin lookup never fires.
+- `onFeedback_lowRating_adminEscalated` — rating ≤ 2: full DC → subdivision → admin
+  two-hop fires + admin's devices fetched.
+- `onCancelled_engineerOfDc` — engineer-of-DC fallback (no assigned tech on SUBMITTED).
+- `onRejected_consumerWithReason` — rejection reason inlined into body.
+- `perRecipientIsolation_failureDoesNotBlockOthers` — `push.send(bad)` throws
+  `RuntimeException` → does NOT propagate; the next device still receives its push.
+  Verifies §6.1 contractually.
+
+Existing `ComplaintEventLogger` (Stage 20's debug-only listener) kept in place — runs
+alongside the real notification listener; its INFO line gives event-level visibility
+while the push service gives per-recipient visibility. Different granularity, not
+redundant.
+
+#### Build status
+
+```
+[INFO] Tests run: 175, Failures: 0, Errors: 0, Skipped: 0  (Surefire — unit; +12 from Stage 21.1)
+[INFO] Tests run:   8, Failures: 0, Errors: 0, Skipped: 0  (Failsafe — IT;   unchanged set, all green)
+[INFO] BUILD SUCCESS
+docs/openapi.json — unchanged at 56 paths (Stage 21.2 ships no HTTP surface; pure internal eventing).
+```
+
+ArchUnit 5/5 green — confirms the new cross-module hops
+(`notification.service → auth.service`, `notification.service → masterdata.service`) stay
+on the allowed side of the slice rules.
+
+#### Carry-overs / known follow-ups
+
+- **Stage 21.3 — `FcmPushService` + Firebase Admin SDK** (was Stage 21.2's "FCM impl"; split
+  out the same way Stage 10c carries the GCS impl):
+  - Add `com.google.firebase:firebase-admin` dependency. Run `validate_cves` on the chosen
+    version before merge.
+  - `@Service` + `@Profile("prod")` + `@ConditionalOnProperty("app.push.provider"="fcm")`.
+  - `FcmProperties` (`@ConfigurationProperties("app.push.fcm")`) — service-account JSON
+    path, project id.
+  - Permanent-failure handling per §6.1: on `NotRegistered` / `InvalidRegistration` /
+    `MismatchSenderId`, flip the offending `device_token` row `active=false` in a fresh
+    `REQUIRES_NEW` transaction so one bad token doesn't poison the fan-out.
+  - Defer until GCP / FCM service-account credentials are provisioned.
+- **Stage 21.3 — `SMS fallback for unregistered consumers` on resolve** — per §5 note.
+  Opt-in behind `app.push.sms-fallback-on-resolve=true`, off by default. Reuses the
+  MSG91 wiring tracked since Stage 9.
+- **Smoke harness coverage** — `scripts/smoke.sh` doesn't exercise the new fan-out. A
+  small extension can: register a consumer device → submit + assign + resolve + close →
+  grep `$APP_LOG_FILE` for `[PUSH] outcome=SENT event=COMPLAINT_*` lines proving every
+  listener fired. Cheap; add the next time we iterate the smoke.
+- **Stage 22 — persisted in-app notification inbox** — same payload shape on the wire,
+  but each push also writes a `notification` row keyed by recipient principal with a
+  per-user `read=false` state. Independent of Stage 21.3; can start any time the FE
+  signs off on a separate Stage 22 contract.
+- **Cache the engineer-per-DC + admin-per-subdivision lookups** — `findActiveEngineerForDc`
+  and `findActiveAdminForSubdivision` are read on every event firing. Caffeine cache by id
+  with a short TTL is the obvious next step if profiling shows hotspots. Deferring until
+  we have signal — premature optimisation otherwise.
+- **`@TransactionalEventListener` failure during AFTER_COMMIT** — if the listener
+  itself throws (not just `push.send`), Spring swallows the exception silently. Today
+  we rely on the per-`sendIsolated` catch to absorb everything that could plausibly
+  fail. If we ever add code paths that can throw before reaching that helper (e.g. a
+  repo timeout on the staff lookup), wrap the listener body in a try/catch too. Tracked
+  but not actioned — current code paths can't throw before isolated `send` runs.
+- **Localisation bump to `schemaVersion=2`** — when Stage 22's inbox ships and the FE
+  starts rendering localised copy from the inbox row (not the push frame), bump
+  `PushPayload.CURRENT_SCHEMA_VERSION` to 2 and add `titleKey`, `bodyKey`, `args`
+  fields. Per FE sign-off §9.1 this is a coordinated Stage 22 change, not Stage 21.x.
+
+
 ## How to update this log
 
 1. At the end of a stage, append (or fill in) the corresponding subsection.
