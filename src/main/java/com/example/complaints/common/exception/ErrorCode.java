@@ -86,7 +86,14 @@ public enum ErrorCode {
 
     // ---------- Feedback ----------
     FEEDBACK_ALREADY_SUBMITTED     (HttpStatus.CONFLICT,              "Feedback has already been submitted for this complaint"),
-    FEEDBACK_NOT_ALLOWED_YET       (HttpStatus.CONFLICT,              "Feedback is allowed only after the complaint is closed");
+    FEEDBACK_NOT_ALLOWED_YET       (HttpStatus.CONFLICT,              "Feedback is allowed only after the complaint is closed"),
+
+    // ---------- Device tokens (Stage 21.1 — STAGE_21_DEVICE_TOKEN_CONTRACT.md §8) ----------
+    DEVICE_PLATFORM_UNSUPPORTED    (HttpStatus.BAD_REQUEST,           "Device platform must be ANDROID, IOS, or WEB"),
+    DEVICE_NOT_OWNED_BY_CONSUMER   (HttpStatus.FORBIDDEN,             "Device is not owned by the calling consumer"),
+    DEVICE_NOT_OWNED_BY_USER       (HttpStatus.FORBIDDEN,             "Device is not owned by the calling user"),
+    INVALID_PUSH_TOKEN_FORMAT      (HttpStatus.BAD_REQUEST,           "Push token failed provider-shape validation"),
+    DEVICE_TOKEN_LIMIT_EXCEEDED    (HttpStatus.CONFLICT,              "Per-principal device limit exceeded; revoke a device before registering another");
 
     private final HttpStatus httpStatus;
     private final String defaultMessage;

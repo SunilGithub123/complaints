@@ -2921,6 +2921,144 @@ _None — no production code touched._
   the right backstop if Stage 21.1 + 21.2 ship faster than the FE can absorb.
 
 
+### Stage 21.1 — Device token registry (schema + REST surface) — ✅ 2026-06-25
+
+> First Stage 21 code slice. Ships the schema, the four `POST` / `DELETE` endpoints, and
+> the persistence-only half of the device-token registry per the frozen contract
+> (`STAGE_21_DEVICE_TOKEN_CONTRACT.md` v1.0). Stage 21.2 adds the push provider + the
+> nine event listeners on top of this.
+
+#### Scope delivered
+
+**Schema** — new module `notification`:
+
+- `V1.5__create_device_token.sql` — drops the V1.0 placeholder `device_token` (staff-only,
+  no `device_id`, no `active`, no XOR — never had any caller / any data) and recreates the
+  table in the contract-conformant shape. Partial-unique indexes on
+  `(consumer_master_id, device_id) WHERE active` and `(user_id, device_id) WHERE active`;
+  fan-out `WHERE active` indexes for the Stage 21.2 listeners; `ck_device_token__principal_xor`
+  enforces exactly-one-principal per row. Attaches the V1.3 `set_updated_at()` trigger
+  explicitly per the Stage 2.1 carry-over (self-contained migration). Per hard-rule #5,
+  V1.0 stays untouched.
+
+**Production code** — all under `com.example.complaints.notification.*`:
+
+- **`model.DeviceToken`** entity (Lombok `@Builder`, all schema columns, DB-managed
+  timestamps via `@Generated`) + **`model.DevicePlatform`** enum (`ANDROID`, `IOS`, `WEB`).
+- **`repository.DeviceTokenRepository`** — four derived finders (active + any, per
+  principal kind). No `@Query` — Spring Data conventions suffice.
+- **`dto.DeviceRegistrationRequest`** (record, `@NotBlank` / `@Size` / `@Schema` on each
+  component) — `platform` bound as `String` (not the enum) so an unknown value surfaces as
+  `DEVICE_PLATFORM_UNSUPPORTED` per §8 rather than a generic Jackson enum-binding 400.
+- **`dto.DeviceTokenResponse`** (record) — deliberately omits `pushToken` per §6.2 (never
+  echo to avoid FE log / cache leakage). Includes `platform`, `appVersion`, `active`,
+  `registeredAt` (IST), `updatedAt` (IST).
+- **`mapper.DeviceTokenMapper`** — hand-written per hard-rule #3.
+- **`service.DeviceTokenService`** — four methods (`register{ForConsumer,ForUser}`,
+  `revoke{ForConsumer,ForUser}`). Register is idempotent upsert: if an active row exists
+  for `(principal, device_id)`, refresh in-place (Hibernate dirty-check; `updated_at`
+  bumps via V1.3 trigger); else insert. Returns `RegistrationResult(response, created)`
+  so the controller can map to 201 vs 200. Revoke is principal-scoped and idempotent:
+  missing / already-inactive row → 204 no-op.
+- **`controller.ConsumerDeviceController`** — `/api/v1/consumer/devices` (POST, DELETE).
+  Uses `@AuthenticationPrincipal VerifiedConsumer caller`; `@SecurityRequirement(name =
+  "consumerVerifyToken")` so the OpenAPI snapshot tags it with the right security scheme.
+- **`controller.StaffDeviceController`** — `/api/v1/staff/devices` (POST, DELETE).
+  Uses `@AuthenticationPrincipal AuthenticatedStaff caller`. Gated by the existing
+  `/api/v1/staff/**` → `.authenticated()` matcher + the `JwtAuthFilter` +
+  `PasswordResetRequiredFilter` chain.
+
+**ErrorCodes added** (5 — all from contract §8):
+
+- `DEVICE_PLATFORM_UNSUPPORTED` (400) — actively thrown when `platform` parses to an
+  unknown value.
+- `DEVICE_NOT_OWNED_BY_CONSUMER` (403), `DEVICE_NOT_OWNED_BY_USER` (403) — reserved.
+  Unreachable in this implementation because every query is principal-scoped (foreign
+  rows are simply invisible) — privacy-stronger than the contract requires. Kept in the
+  enum for future cross-principal admin endpoints. Documented inline in
+  `DeviceTokenService`.
+- `INVALID_PUSH_TOKEN_FORMAT` (400) — reserved per FE sign-off. No provider-shape
+  validation in 21.1 (FCM / APNs validate on send in 21.2).
+- `DEVICE_TOKEN_LIMIT_EXCEEDED` (409) — reserved per FE sign-off. No cap enforced in 21.1.
+
+**Security wiring**: no `SecurityConfig` change required.
+- `/api/v1/consumer/devices/**` falls under the existing `/api/v1/consumer/**` →
+  `permitAll` at chain level + `ConsumerVerificationFilter` (Stage 20.3 ensured
+  `JwtAuthFilter` skips this prefix via `shouldNotFilter`).
+- `/api/v1/staff/devices/**` falls under the existing `/api/v1/staff/**` →
+  `.authenticated()` matcher; `JwtAuthFilter` + `PasswordResetRequiredFilter` apply.
+
+#### Incidents fixed during implementation
+
+| # | Symptom | Root cause | Fix |
+|---|---------|-----------|-----|
+| 1 | Every IT failed at context load: `PSQLException: relation "device_token" already exists` while applying V1.5. | V1.0 shipped a placeholder `device_token` table back in Phase 0 (staff-only, `user_id NOT NULL`, `token UNIQUE`, `platform VARCHAR(20)`) — a forgotten scaffold. None of the production code references it; it's been dead schema for six months. V1.5 tried to `CREATE TABLE` on top of it. | V1.5 prepended with `DROP TABLE IF EXISTS device_token CASCADE;` before the `CREATE TABLE`. Safe because (a) the placeholder has zero callers and (b) it's empty in every environment (production has never written a row). Per hard-rule #5, V1.0 stays untouched. Migration header comment records the rationale so the next reader doesn't think this was a careless overwrite. |
+| 2 | IDE inspector flagged 5 phantom errors: `Could not autowire DeviceTokenRepository` + "never used" warnings on the four service methods + an unresolved Javadoc symbol. | IntelliJ static analysis can't see Spring Data proxies (repos) or runtime-wired controller dependencies, and cross-file Javadoc symbol resolution lags behind file creation order. | Ignored — verified clean via `./mvnw compile` (zero warnings, zero errors). Same class of false-positives we've documented since Stage 1. |
+
+#### Tests added (11 new — total 163 unit + 8 IT)
+
+Minimum-test policy: 1 happy + 1 unhappy per representative behaviour. Two test classes
+(one service slice, one controller slice covering both `Consumer*` and `Staff*` —
+shape-identical modulo principal).
+
+- `notification/service/DeviceTokenServiceTest` (5):
+  - `registerForConsumer_firstTime_created` — first-time path: `created=true`, row
+    persisted with consumer FK, `active=true`, push token captured.
+  - `registerForConsumer_refresh_inPlace` — same `(principal, device_id)` second time:
+    `created=false`, push token overwritten via Hibernate dirty-check, no `save(...)` call
+    (proves the refresh path doesn't re-insert).
+  - `registerForUser_badPlatform_rejected` — unknown `platform` → `DEVICE_PLATFORM_UNSUPPORTED`,
+    repo never touched (early fail before any query).
+  - `revokeForConsumer_missing_isIdempotent` — missing row → no-op, no save.
+  - `revokeForUser_active_flipsActive` — active row → `active=false` via dirty-check, no save.
+- `notification/controller/DeviceControllersTest` (6, `@WebMvcTest` slice covering both
+  controllers in one class):
+  - `consumerRegister_firstTime_201` — 201 Created envelope; explicit assertion that
+    `$.data.pushToken` does not exist (privacy guard).
+  - `consumerRegister_refresh_200` — refresh path yields 200 OK (not 201).
+  - `consumerRegister_blankDeviceId_400` — `VALIDATION_FAILED`, service untouched.
+  - `consumerRevoke_204` — DELETE returns 204 (no envelope).
+  - `staffRegister_firstTime_201` — symmetric to consumer; delegates with caller `userId`.
+  - `staffRevoke_204` — symmetric to consumer revoke.
+
+#### Build status
+
+```
+[INFO] Tests run: 163, Failures: 0, Errors: 0, Skipped: 0  (Surefire — unit; +11 from Stage 20.6)
+[INFO] Tests run:   8, Failures: 0, Errors: 0, Skipped: 0  (Failsafe — IT;   unchanged set, all still green against V1.5)
+[INFO] BUILD SUCCESS
+docs/openapi.json — 52 → 56 paths (+4: consumer + staff devices, POST and DELETE each).
+```
+
+#### Carry-overs / known follow-ups
+
+- **Stage 21.2** (next slice — push provider + listeners):
+  - `PushService` interface + `ConsolePushService` (`@Profile({"dev","test"})` +
+    `@ConditionalOnProperty(... matchIfMissing=true)`) that logs the rendered payload at
+    INFO so the dev smoke can verify fan-out without FCM credentials.
+  - `FcmPushService` (`@ConditionalOnProperty("app.push.provider=fcm")`) using
+    `firebase-admin` against a service-account JSON. Dep + CVE check come with this slice.
+  - Nine `@TransactionalEventListener(phase = AFTER_COMMIT)` methods, one per
+    `ComplaintEvent`, per contract §5. Each composes the payload (data-only message with
+    `type`, `ticketNo`, `complaintId`, `title`, `body`, `eventOccurredAt`,
+    `schemaVersion`) and fans out to the recipient set's active device tokens with
+    per-token failure isolation.
+  - One `app.push.never-log-list` config (mirrors §6.2: push token, raw event payload,
+    PII never logged) + the corresponding test that asserts the logger is muted.
+- **FE-side coordination** — FE can now generate the client (`pnpm api:gen` against the
+  refreshed `docs/openapi.json`) and call `register{Consumer,Staff}Device` /
+  `revoke{Consumer,Staff}Device`. The `pushToken` field is correctly absent from the
+  generated `DeviceTokenResponse` type (so FE can't accidentally cache it). The 200-vs-201
+  distinction is on the HTTP response, orval will surface both as success.
+- **Smoke harness** — `scripts/smoke.sh` doesn't exercise the device endpoints. Add a
+  small step (consumer-register → consumer-revoke; staff-register → staff-revoke) the
+  next time we touch the smoke, after Stage 21.2 has visible side effects worth asserting.
+- **`@DataJpaTest` for the partial-unique indexes** — skipped per minimum-test policy.
+  The boot IT exercises the migration; the contract-level partial-unique guarantee is
+  enforced by Postgres at the DB layer (not application code). If we ever discover a real
+  bug exploiting the partial-unique semantics, that's the moment to add the slice IT.
+
+
 ## How to update this log
 
 1. At the end of a stage, append (or fill in) the corresponding subsection.
