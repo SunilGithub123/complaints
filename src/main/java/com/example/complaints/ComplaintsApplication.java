@@ -19,7 +19,8 @@ import java.util.TimeZone;
         "com.example.complaints.auth.security",
         "com.example.complaints.auth.service",
         "com.example.complaints.complaint",
-        "com.example.complaints.storage"
+        "com.example.complaints.storage",
+        "com.example.complaints.notification"
 })
 public class ComplaintsApplication {
 

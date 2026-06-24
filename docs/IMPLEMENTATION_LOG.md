@@ -3313,6 +3313,100 @@ docs/openapi.json — 56 paths unchanged; every operation now carries a stable, 
   the guard becomes proportionally more valuable.
 
 
+### Stage 21.2.2 — Nightly stale-device-token sweep — ✅ 2026-06-25
+
+> Closes the Stage 21.2 carry-over *"nightly stale-token sweep"*. Long-idle
+> `device_token` rows are flipped to `active = false` so the fan-out
+> (`ComplaintNotificationListener`) stops targeting devices that have not refreshed in
+> a while — uninstalled app, OS-revoked permission, killed-and-never-relaunched. Pure
+> backend, zero FE coordination, no new endpoint, no contract change.
+
+#### What shipped
+
+- **`notification.DeviceTokenSweepProperties`** — `record` bound from
+  `app.device-token-sweep.*` with two fields: `inactivityDays` (default 60) and
+  `enabled` (default true; kill-switch). Defensive ctor clamps `inactivityDays <= 0`
+  back to 60 — fail-soft to production-sane.
+- **`notification.service.DeviceTokenSweepJob`** — `@Scheduled(cron = "0 30 3 * * *",
+  zone = "Asia/Kolkata")`. Off-peak 03:30 IST. Computes
+  `cutoff = now() − inactivityDays` and calls the new bulk-update repo method.
+  Logs at `INFO` only when rows were actually swept (zero-noise on quiet nights);
+  `DEBUG` when the kill-switch suppresses the run.
+- **`DeviceTokenRepository.markInactiveOlderThan(Instant)`** — `@Modifying`
+  bulk-update query: `update DeviceToken d set d.active = false where d.active = true
+  and d.updatedAt < :cutoff`. Returns row count for the log line. Bypasses the
+  persistence context so we don't load + dirty-check potentially thousands of rows.
+- **`application.yml`** — `app.device-token-sweep.inactivity-days: 60` +
+  `enabled: true` with inline comment explaining what the sweep does. Mirrors the
+  same pattern as `app.complaint.*` / `app.otp.*`.
+- **`ComplaintsApplication`** — added `com.example.complaints.notification` to
+  `@ConfigurationPropertiesScan` so the new record gets picked up.
+- **Tests**: `DeviceTokenSweepJobTest` — 2 tests per the minimum-test policy.
+  - Happy: cutoff is `now − 60d` and `markInactiveOlderThan` gets called once;
+    captured `Instant` is asserted to sit inside `[before − 60d, after − 60d]` to
+    cover the small wall-clock delta between the two `Instant.now()` calls.
+  - Kill-switch: when `enabled = false` the job logs at DEBUG and the repo is never
+    touched (`verify(repo, never()).markInactiveOlderThan(any())`).
+
+#### Why `updated_at` (not `created_at`) is the right idleness signal
+
+The V1.3 trigger refreshes `device_token.updated_at` on every register/refresh per
+contract §3.1's idempotent-upsert pattern. So `updated_at` is effectively
+*"last time FE proved the token still works"* — which is exactly the lifetime signal
+the sweep needs. `created_at` would only tell us when the device first registered,
+which is useless once a heavily-used phone has been refreshing daily for months.
+
+#### Why bulk-update instead of `findAll → set → save`
+
+A subdivision with O(10k) active device rows would force Hibernate to materialise
+each row, dirty-check it, and emit one `UPDATE` per row — defeating the point of a
+nightly batch job. The single `@Modifying` query collapses the whole sweep into one
+SQL statement. The trade-off is that any first-level cache entry for those rows would
+go stale within the same transaction, but the job has no other reads/writes around
+the bulk update so this is a non-issue.
+
+#### Why the kill-switch
+
+Three reasons it earns its keep beyond the "you should always have one" reflex:
+
+1. **Ops emergency lever** — if the sweep misbehaves on prod we can disable it via a
+   config change + redeploy rather than reverting code.
+2. **Sandbox dev environments** — for FE smoke tests against a fresh DB we may want
+   tokens to never expire so the same device row survives long demo cycles.
+3. **Test isolation** — defaults to `true` in `application.yml`, but a future test
+   profile yml can flip it to `false` if any IT proves flaky around the 03:30 cron.
+
+#### Tests added
+
+- `DeviceTokenSweepJobTest` — 2 tests (happy + kill-switch). No IT: this is a single
+  JPQL bulk-update query — Spring Data + Hibernate's JPQL emitter is already
+  exercised by hundreds of existing queries; an IT here would only re-prove that the
+  framework works.
+
+#### Build status
+
+```
+[INFO] Tests run: 177, Failures: 0, Errors: 0, Skipped: 0  (Surefire — unit; +2 vs Stage 21.2.1)
+[INFO] Tests run:   8, Failures: 0, Errors: 0, Skipped: 0  (Failsafe — IT;   unchanged, all green)
+[INFO] BUILD SUCCESS
+docs/openapi.json — 56 paths, unchanged (sweep is internal; no endpoint added).
+```
+
+#### Carry-overs / known follow-ups
+
+- **Stage 21.3 BE — real `FcmPushService`** is the next push-stack step. **Gated on
+  GCP service-account JSON being provisioned for staging.** Until creds land,
+  `ConsolePushService` continues to exercise the listener pipeline on dev. Heads-up
+  ping to FE flagged this.
+- **Spec-drift CI guard** continues to ride (Stage 3 / 6 / 7 / 21.2.1 carry).
+- **SMS fallback for tokenless consumers** still parked per FE alignment — Stage 22+
+  decision once the persisted-inbox row exists to drive routing.
+- Sweep currently runs against an empty `updated_at` column index — performance is
+  fine while the table is small. If `device_token` grows past O(100k) rows on prod,
+  consider `CREATE INDEX ix_device_token_updated_at_active ON device_token (updated_at)
+  WHERE active` in a follow-up migration. Tracked, not blocking.
+
+
 ## How to update this log
 
 1. At the end of a stage, append (or fill in) the corresponding subsection.

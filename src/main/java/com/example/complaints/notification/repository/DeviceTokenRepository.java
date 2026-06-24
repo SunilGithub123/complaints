@@ -2,7 +2,11 @@ package com.example.complaints.notification.repository;
 
 import com.example.complaints.notification.model.DeviceToken;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
@@ -25,5 +29,13 @@ public interface DeviceTokenRepository extends JpaRepository<DeviceToken, Long> 
 
     /** Stage 21.2 fan-out — all active device rows for a consumer. */
     List<DeviceToken> findByConsumerMasterIdAndActiveTrue(Long consumerMasterId);
-}
 
+    /**
+     * Stage 21.2.2 — nightly sweep. Flips every active row whose {@code updated_at}
+     * is older than the supplied cutoff to {@code active = false}. Returns the row
+     * count for logging. Bulk update — bypasses the persistence context.
+     */
+    @Modifying
+    @Query("update DeviceToken d set d.active = false where d.active = true and d.updatedAt < :cutoff")
+    int markInactiveOlderThan(@Param("cutoff") Instant cutoff);
+}

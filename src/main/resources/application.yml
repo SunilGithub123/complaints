@@ -76,6 +76,11 @@ app:
     # OTP delivery provider. `console` = ConsoleSmsService (dev default; prints to stdout).
     # Override to `msg91` once the MSG91 adapter ships (Phase 3 follow-up).
     provider: console
+  device-token-sweep:
+    # Stage 21.2.2 nightly sweep. Flips active device_token rows to inactive once
+    # they have not refreshed in this many days. Set enabled=false to skip the run.
+    inactivity-days: 60
+    enabled: true
   bootstrap-admin:
     employee-id: ${BOOTSTRAP_ADMIN_EMPLOYEE_ID:}
     password: ${BOOTSTRAP_ADMIN_PASSWORD:}
