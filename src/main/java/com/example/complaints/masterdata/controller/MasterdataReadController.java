@@ -34,35 +34,41 @@ public class MasterdataReadController {
     private final ComplaintCategoryService categories;
 
     @GetMapping("/subdivisions")
-    @Operation(summary = "List subdivisions (paginated)")
+    @Operation(operationId = "listSubdivisions",
+            summary = "List subdivisions (paginated)")
     public ResponseEntity<ApiResponse<PageResponse<SubdivisionResponse>>> listSubdivisions(Pageable pageable) {
         return ResponseEntity.ok(ApiResponse.ok(subdivisions.list(pageable)));
     }
 
+    @Operation(operationId = "getSubdivision", summary = "Fetch a subdivision by id")
     @GetMapping("/subdivisions/{id}")
     public ResponseEntity<ApiResponse<SubdivisionResponse>> getSubdivision(@PathVariable Long id) {
         return ResponseEntity.ok(ApiResponse.ok(subdivisions.get(id)));
     }
 
     @GetMapping("/distribution-centers")
-    @Operation(summary = "List distribution centers (optionally filtered by subdivision)")
+    @Operation(operationId = "listDistributionCenters",
+            summary = "List distribution centers (optionally filtered by subdivision)")
     public ResponseEntity<ApiResponse<PageResponse<DistributionCenterResponse>>> listDcs(
             @RequestParam(required = false) Long subdivisionId,
             Pageable pageable) {
         return ResponseEntity.ok(ApiResponse.ok(dcs.list(subdivisionId, pageable)));
     }
 
+    @Operation(operationId = "getDistributionCenter", summary = "Fetch a DC by id")
     @GetMapping("/distribution-centers/{id}")
     public ResponseEntity<ApiResponse<DistributionCenterResponse>> getDc(@PathVariable Long id) {
         return ResponseEntity.ok(ApiResponse.ok(dcs.get(id)));
     }
 
     @GetMapping("/categories")
-    @Operation(summary = "List complaint categories")
+    @Operation(operationId = "listCategories",
+            summary = "List complaint categories")
     public ResponseEntity<ApiResponse<PageResponse<ComplaintCategoryResponse>>> listCategories(Pageable pageable) {
         return ResponseEntity.ok(ApiResponse.ok(categories.list(pageable)));
     }
 
+    @Operation(operationId = "getCategory", summary = "Fetch a category by id")
     @GetMapping("/categories/{id}")
     public ResponseEntity<ApiResponse<ComplaintCategoryResponse>> getCategory(@PathVariable Long id) {
         return ResponseEntity.ok(ApiResponse.ok(categories.get(id)));

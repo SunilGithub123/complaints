@@ -33,19 +33,22 @@ public class StaffAuthController {
     private final StaffAuthService authService;
 
     @PostMapping("/auth/login")
-    @Operation(summary = "Login with employee ID + password")
+    @Operation(operationId = "loginStaff",
+            summary = "Login with employee ID + password")
     public ResponseEntity<ApiResponse<LoginResponse>> login(@Valid @RequestBody LoginRequest req) {
         return ResponseEntity.ok(ApiResponse.ok(authService.login(req)));
     }
 
     @PostMapping("/auth/refresh")
-    @Operation(summary = "Rotate refresh token; returns new access + refresh pair")
+    @Operation(operationId = "refreshStaffToken",
+            summary = "Rotate refresh token; returns new access + refresh pair")
     public ResponseEntity<ApiResponse<LoginResponse>> refresh(@Valid @RequestBody RefreshTokenRequest req) {
         return ResponseEntity.ok(ApiResponse.ok(authService.refresh(req)));
     }
 
     @PostMapping("/auth/change-password")
-    @Operation(summary = "Change password and receive a fresh token pair",
+    @Operation(operationId = "changeStaffPassword",
+            summary = "Change password and receive a fresh token pair",
             description = "Persists the new password, revokes every refresh token belonging to the "
                     + "caller (kicks all other sessions), and returns a brand-new access + refresh "
                     + "pair with passwordResetRequired = false in both the JWT claims and the "
@@ -58,7 +61,8 @@ public class StaffAuthController {
     }
 
     @PostMapping("/auth/logout")
-    @Operation(summary = "Revoke the provided refresh token (or all sessions if body omitted)")
+    @Operation(operationId = "logoutStaff",
+            summary = "Revoke the provided refresh token (or all sessions if body omitted)")
     public ResponseEntity<ApiResponse<Void>> logout(
             @AuthenticationPrincipal AuthenticatedStaff me,
             @RequestBody(required = false) RefreshTokenRequest req) {
@@ -68,14 +72,16 @@ public class StaffAuthController {
     }
 
     @GetMapping("/me")
-    @Operation(summary = "Current staff profile")
+    @Operation(operationId = "getMyStaffProfile",
+            summary = "Current staff profile")
     public ResponseEntity<ApiResponse<StaffSummaryResponse>> me(@AuthenticationPrincipal AuthenticatedStaff me) {
         requireAuth(me);
         return ResponseEntity.ok(ApiResponse.ok(authService.me(me.userId())));
     }
 
     @PutMapping("/me")
-    @Operation(summary = "Update my profile (self-service)",
+    @Operation(operationId = "updateMyStaffProfile",
+            summary = "Update my profile (self-service)",
             description = "Updates the caller's own mutable profile fields: fullName, email, "
                     + "mobile, notificationsPushEnabled. Scope fields (role, subdivisionId, "
                     + "distributionCenterId, employeeId) are immutable here — those are admin "

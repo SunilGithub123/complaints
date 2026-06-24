@@ -36,7 +36,8 @@ public class ConsumerDeviceController {
     private final DeviceTokenService service;
 
     @PostMapping
-    @Operation(summary = "Register (or refresh) the calling consumer's device for push",
+    @Operation(operationId = "registerConsumerDevice",
+            summary = "Register (or refresh) the calling consumer's device for push",
             description = "Idempotent: re-posting the same deviceId refreshes the push token in "
                     + "place. Returns 201 on first registration, 200 on refresh.")
     public ResponseEntity<ApiResponse<DeviceTokenResponse>> register(
@@ -50,7 +51,8 @@ public class ConsumerDeviceController {
     }
 
     @DeleteMapping("/{deviceId}")
-    @Operation(summary = "Revoke the calling consumer's device (soft delete, idempotent)",
+    @Operation(operationId = "revokeConsumerDevice",
+            summary = "Revoke the calling consumer's device (soft delete, idempotent)",
             description = "Flips active=false. Missing or already-inactive device → 204 no-op.")
     public ResponseEntity<Void> revoke(
             @AuthenticationPrincipal VerifiedConsumer caller,

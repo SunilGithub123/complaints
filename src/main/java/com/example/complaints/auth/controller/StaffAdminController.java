@@ -37,7 +37,8 @@ public class StaffAdminController {
 
     private final StaffAdminService service;
 
-    @Operation(summary = "List staff in the admin's subdivision (paged, filterable)")
+    @Operation(operationId = "listStaff",
+            summary = "List staff in the admin's subdivision (paged, filterable)")
     @GetMapping
     public ApiResponse<PageResponse<StaffListItemResponse>> list(
             @AuthenticationPrincipal AuthenticatedStaff me,
@@ -48,7 +49,8 @@ public class StaffAdminController {
         return ApiResponse.ok(service.list(me, role, distributionCenterId, enabled, pageable));
     }
 
-    @Operation(summary = "Fetch one staff account by ID")
+    @Operation(operationId = "getStaff",
+            summary = "Fetch one staff account by ID")
     @GetMapping("/{id}")
     public ApiResponse<StaffListItemResponse> get(
             @AuthenticationPrincipal AuthenticatedStaff me,
@@ -56,7 +58,8 @@ public class StaffAdminController {
         return ApiResponse.ok(service.get(me, id));
     }
 
-    @Operation(summary = "Create a staff account; returns the one-time temporary password")
+    @Operation(operationId = "createStaff",
+            summary = "Create a staff account; returns the one-time temporary password")
     @PostMapping
     public ApiResponse<ResetStaffPasswordResponse> create(
             @AuthenticationPrincipal AuthenticatedStaff me,
@@ -64,7 +67,8 @@ public class StaffAdminController {
         return ApiResponse.ok(service.create(me, body));
     }
 
-    @Operation(summary = "Update an existing staff account (profile + DC reassignment)")
+    @Operation(operationId = "updateStaff",
+            summary = "Update an existing staff account (profile + DC reassignment)")
     @PutMapping("/{id}")
     public ApiResponse<StaffListItemResponse> update(
             @AuthenticationPrincipal AuthenticatedStaff me,
@@ -73,7 +77,8 @@ public class StaffAdminController {
         return ApiResponse.ok(service.update(me, id, body));
     }
 
-    @Operation(summary = "Activate a staff account")
+    @Operation(operationId = "activateStaff",
+            summary = "Activate a staff account")
     @PostMapping("/{id}/activate")
     public ApiResponse<StaffListItemResponse> activate(
             @AuthenticationPrincipal AuthenticatedStaff me,
@@ -81,7 +86,8 @@ public class StaffAdminController {
         return ApiResponse.ok(service.setActive(me, id, true));
     }
 
-    @Operation(summary = "Deactivate a staff account (revokes all live sessions)")
+    @Operation(operationId = "deactivateStaff",
+            summary = "Deactivate a staff account (revokes all live sessions)")
     @PostMapping("/{id}/deactivate")
     public ApiResponse<StaffListItemResponse> deactivate(
             @AuthenticationPrincipal AuthenticatedStaff me,
@@ -89,7 +95,8 @@ public class StaffAdminController {
         return ApiResponse.ok(service.setActive(me, id, false));
     }
 
-    @Operation(summary = "Reset a staff account password; returns the one-time temporary password")
+    @Operation(operationId = "resetStaffPassword",
+            summary = "Reset a staff account password; returns the one-time temporary password")
     @PostMapping("/{id}/reset-password")
     public ApiResponse<ResetStaffPasswordResponse> resetPassword(
             @AuthenticationPrincipal AuthenticatedStaff me,

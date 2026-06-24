@@ -27,13 +27,15 @@ public class DistributionCenterAdminController {
     private final DistributionCenterService service;
 
     @PostMapping
-    @Operation(summary = "Create a DC under the admin's subdivision")
+    @Operation(operationId = "createDistributionCenter",
+            summary = "Create a DC under the admin's subdivision")
     public ResponseEntity<ApiResponse<DistributionCenterResponse>> create(
             @AuthenticationPrincipal AuthenticatedStaff me,
             @Valid @RequestBody DistributionCenterRequest req) {
         return ResponseEntity.ok(ApiResponse.ok(service.create(me, req)));
     }
 
+    @Operation(operationId = "updateDistributionCenter", summary = "Update a DC")
     @PutMapping("/{id}")
     public ResponseEntity<ApiResponse<DistributionCenterResponse>> update(
             @AuthenticationPrincipal AuthenticatedStaff me,
@@ -42,6 +44,7 @@ public class DistributionCenterAdminController {
         return ResponseEntity.ok(ApiResponse.ok(service.update(me, id, req)));
     }
 
+    @Operation(operationId = "deactivateDistributionCenter", summary = "Deactivate a DC")
     @PostMapping("/{id}/deactivate")
     public ResponseEntity<ApiResponse<DistributionCenterResponse>> deactivate(
             @AuthenticationPrincipal AuthenticatedStaff me,
@@ -49,6 +52,7 @@ public class DistributionCenterAdminController {
         return ResponseEntity.ok(ApiResponse.ok(service.setActive(me, id, false)));
     }
 
+    @Operation(operationId = "activateDistributionCenter", summary = "Activate a DC")
     @PostMapping("/{id}/activate")
     public ResponseEntity<ApiResponse<DistributionCenterResponse>> activate(
             @AuthenticationPrincipal AuthenticatedStaff me,

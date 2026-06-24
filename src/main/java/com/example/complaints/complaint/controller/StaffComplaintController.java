@@ -59,7 +59,8 @@ public class StaffComplaintController {
     private final ComplaintSearchService search;
 
     @GetMapping
-    @Operation(summary = "Paged complaint search for engineer / admin",
+    @Operation(operationId = "searchStaffComplaints",
+            summary = "Paged complaint search for engineer / admin",
             description = "Filters compose with caller-scope: engineer = own DC, admin = own subdivision. "
                     + "Default sort is createdAt,desc.")
     public ResponseEntity<ApiResponse<PageResponse<ComplaintListItemResponse>>> list(
@@ -71,7 +72,8 @@ public class StaffComplaintController {
     }
 
     @GetMapping("/{id}")
-    @Operation(summary = "Engineer / Admin detail view of a complaint (scope-checked)")
+    @Operation(operationId = "getStaffComplaint",
+            summary = "Engineer / Admin detail view of a complaint (scope-checked)")
     public ResponseEntity<ApiResponse<ComplaintStaffDetailResponse>> getById(
             @AuthenticationPrincipal AuthenticatedStaff caller,
             @PathVariable Long id
@@ -80,7 +82,8 @@ public class StaffComplaintController {
     }
 
     @GetMapping("/{id}/history")
-    @Operation(summary = "Status-change audit trail for a complaint (chronological)")
+    @Operation(operationId = "getStaffComplaintHistory",
+            summary = "Status-change audit trail for a complaint (chronological)")
     public ResponseEntity<ApiResponse<List<ComplaintHistoryEntryResponse>>> getHistory(
             @AuthenticationPrincipal AuthenticatedStaff caller,
             @PathVariable Long id
@@ -89,7 +92,8 @@ public class StaffComplaintController {
     }
 
     @PostMapping("/{id}/assign")
-    @Operation(summary = "Assign a SUBMITTED complaint to a technician and set severity")
+    @Operation(operationId = "assignComplaint",
+            summary = "Assign a SUBMITTED complaint to a technician and set severity")
     public ResponseEntity<ApiResponse<Void>> assign(
             @AuthenticationPrincipal AuthenticatedStaff caller,
             @PathVariable Long id,
@@ -100,7 +104,8 @@ public class StaffComplaintController {
     }
 
     @PostMapping("/{id}/reassign")
-    @Operation(summary = "Reassign an already-assigned complaint to a different technician")
+    @Operation(operationId = "reassignComplaint",
+            summary = "Reassign an already-assigned complaint to a different technician")
     public ResponseEntity<ApiResponse<Void>> reassign(
             @AuthenticationPrincipal AuthenticatedStaff caller,
             @PathVariable Long id,
@@ -111,7 +116,8 @@ public class StaffComplaintController {
     }
 
     @PostMapping("/{id}/severity")
-    @Operation(summary = "Update severity of a non-terminal complaint")
+    @Operation(operationId = "updateComplaintSeverity",
+            summary = "Update severity of a non-terminal complaint")
     public ResponseEntity<ApiResponse<Void>> updateSeverity(
             @AuthenticationPrincipal AuthenticatedStaff caller,
             @PathVariable Long id,
@@ -122,7 +128,8 @@ public class StaffComplaintController {
     }
 
     @PostMapping("/{id}/reject")
-    @Operation(summary = "Reject a SUBMITTED complaint with a reason")
+    @Operation(operationId = "rejectComplaint",
+            summary = "Reject a SUBMITTED complaint with a reason")
     public ResponseEntity<ApiResponse<Void>> reject(
             @AuthenticationPrincipal AuthenticatedStaff caller,
             @PathVariable Long id,
@@ -133,7 +140,8 @@ public class StaffComplaintController {
     }
 
     @PostMapping("/{id}/mark-duplicate")
-    @Operation(summary = "Mark a SUBMITTED complaint as a duplicate of another (by ticket number)")
+    @Operation(operationId = "markComplaintDuplicate",
+            summary = "Mark a SUBMITTED complaint as a duplicate of another (by ticket number)")
     public ResponseEntity<ApiResponse<Void>> markDuplicate(
             @AuthenticationPrincipal AuthenticatedStaff caller,
             @PathVariable Long id,
@@ -144,7 +152,8 @@ public class StaffComplaintController {
     }
 
     @PostMapping("/{id}/close")
-    @Operation(summary = "Engineer / Admin close-on-behalf of a RESOLVED complaint",
+    @Operation(operationId = "closeComplaint",
+            summary = "Engineer / Admin close-on-behalf of a RESOLVED complaint",
             description = "Returns the post-close detail (status=CLOSED + bumped version) so the FE "
                     + "can update its cache in one round-trip without a follow-up GET.")
     public ResponseEntity<ApiResponse<ComplaintStaffDetailResponse>> close(

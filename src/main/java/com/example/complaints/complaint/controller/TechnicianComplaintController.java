@@ -48,7 +48,8 @@ public class TechnicianComplaintController {
     private final ComplaintSearchService search;
 
     @GetMapping
-    @Operation(summary = "Paged list of complaints assigned to the calling technician",
+    @Operation(operationId = "listTechnicianComplaints",
+            summary = "Paged list of complaints assigned to the calling technician",
             description = "Server pins assigned_technician_id = caller.userId(). "
                     + "Optional filters: status, severity, slaBreached, dateFrom/dateTo, q.")
     public ResponseEntity<ApiResponse<PageResponse<ComplaintListItemResponse>>> list(
@@ -60,7 +61,8 @@ public class TechnicianComplaintController {
     }
 
     @PostMapping("/{id}/start")
-    @Operation(summary = "Start work on an ASSIGNED complaint (→ IN_PROGRESS)")
+    @Operation(operationId = "startComplaint",
+            summary = "Start work on an ASSIGNED complaint (→ IN_PROGRESS)")
     public ResponseEntity<ApiResponse<Void>> start(
             @AuthenticationPrincipal AuthenticatedStaff caller,
             @PathVariable Long id
@@ -70,7 +72,8 @@ public class TechnicianComplaintController {
     }
 
     @PostMapping("/{id}/resolve")
-    @Operation(summary = "Mark an IN_PROGRESS complaint RESOLVED (SLA-breach reason required if late)")
+    @Operation(operationId = "resolveComplaint",
+            summary = "Mark an IN_PROGRESS complaint RESOLVED (SLA-breach reason required if late)")
     public ResponseEntity<ApiResponse<Void>> resolve(
             @AuthenticationPrincipal AuthenticatedStaff caller,
             @PathVariable Long id,
@@ -81,7 +84,8 @@ public class TechnicianComplaintController {
     }
 
     @PostMapping(value = "/{id}/images", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @Operation(summary = "Upload up to 3 resolution images (multipart, image/jpeg or image/png)")
+    @Operation(operationId = "addResolutionImages",
+            summary = "Upload up to 3 resolution images (multipart, image/jpeg or image/png)")
     public ResponseEntity<ApiResponse<List<ComplaintImageResponse>>> addImages(
             @AuthenticationPrincipal AuthenticatedStaff caller,
             @PathVariable Long id,
@@ -91,7 +95,8 @@ public class TechnicianComplaintController {
     }
 
     @PostMapping("/{id}/close")
-    @Operation(summary = "Close a RESOLVED complaint that is assigned to the calling technician",
+    @Operation(operationId = "closeComplaintAsTechnician",
+            summary = "Close a RESOLVED complaint that is assigned to the calling technician",
             description = "BRD §4.8: technician is the normal closing actor. Caller must be the "
                     + "assigned technician; complaint must be RESOLVED. Body's slaBreachReason is "
                     + "required only when the complaint is SLA-breached and no reason was already "

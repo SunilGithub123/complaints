@@ -35,7 +35,8 @@ public class StaffDeviceController {
     private final DeviceTokenService service;
 
     @PostMapping
-    @Operation(summary = "Register (or refresh) the calling staff user's device for push",
+    @Operation(operationId = "registerStaffDevice",
+            summary = "Register (or refresh) the calling staff user's device for push",
             description = "Idempotent: re-posting the same deviceId refreshes the push token in "
                     + "place. Returns 201 on first registration, 200 on refresh.")
     public ResponseEntity<ApiResponse<DeviceTokenResponse>> register(
@@ -49,7 +50,8 @@ public class StaffDeviceController {
     }
 
     @DeleteMapping("/{deviceId}")
-    @Operation(summary = "Revoke the calling staff user's device (soft delete, idempotent)",
+    @Operation(operationId = "revokeStaffDevice",
+            summary = "Revoke the calling staff user's device (soft delete, idempotent)",
             description = "Flips active=false. Missing or already-inactive device → 204 no-op. "
                     + "Called by the FE logout reducer before clearing the JWT.")
     public ResponseEntity<Void> revoke(

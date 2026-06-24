@@ -51,13 +51,15 @@ public class StaffDirectoryController {
     private final StaffLookupService lookup;
 
     @GetMapping("/{id}")
-    @Operation(summary = "Resolve a single staff id to a directory entry")
+    @Operation(operationId = "getStaffDirectoryEntry",
+            summary = "Resolve a single staff id to a directory entry")
     public ResponseEntity<ApiResponse<StaffDirectoryEntryResponse>> getById(@PathVariable Long id) {
         return ResponseEntity.ok(ApiResponse.ok(lookup.getDirectoryEntry(id)));
     }
 
     @GetMapping(params = "ids")
-    @Operation(summary = "Batch-resolve up to 50 staff ids in one round-trip",
+    @Operation(operationId = "getStaffDirectoryEntries",
+            summary = "Batch-resolve up to 50 staff ids in one round-trip",
             description = "Unknown ids are silently dropped. Order of the response is not guaranteed.")
     public ResponseEntity<ApiResponse<List<StaffDirectoryEntryResponse>>> getMany(
             @RequestParam("ids") @Size(min = 1, max = MAX_BATCH_IDS) List<Long> ids
@@ -67,6 +69,7 @@ public class StaffDirectoryController {
 
     @GetMapping
     @Operation(
+            operationId = "searchStaffDirectory",
             summary = "Paged directory search (filterable by role / DC / active)",
             description = "Used by the FE picker dropdowns. Scope is server-enforced: "
                     + "engineers / technicians are pinned to their own DC; admins to their subdivision. "

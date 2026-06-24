@@ -32,7 +32,8 @@ public class ConsumerAuthController {
     private final OtpService otpService;
 
     @PostMapping("/otp/send")
-    @Operation(summary = "Send a 6-digit OTP to the supplied mobile",
+    @Operation(operationId = "sendConsumerOtp",
+            summary = "Send a 6-digit OTP to the supplied mobile",
             description = "Validates the Consumer ID against consumer_master, then issues a "
                     + "BCrypt-hashed OTP (raw never persisted or logged). Enforces a 30-second "
                     + "per-mobile cooldown and a max 5 sends per mobile per hour.")
@@ -42,7 +43,8 @@ public class ConsumerAuthController {
     }
 
     @PostMapping("/otp/verify")
-    @Operation(summary = "Verify an OTP and receive a 5-minute consumer verification token",
+    @Operation(operationId = "verifyConsumerOtp",
+            summary = "Verify an OTP and receive a 5-minute consumer verification token",
             description = "On success, returns a non-refreshable 5-minute JWT carrying "
                     + "consumerId, consumerMasterId, and the OTP-verified mobile. Use it on every "
                     + "/api/v1/consumer/** call. After expiry, repeat the send/verify cycle.")

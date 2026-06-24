@@ -3228,6 +3228,91 @@ on the allowed side of the slice rules.
   fields. Per FE sign-off §9.1 this is a coordinated Stage 22 change, not Stage 21.x.
 
 
+### Stage 21.2.1 — Stable `operationId` annotations across every controller — ✅ 2026-06-25
+
+> FE post-Stage-21.1 feedback flagged a recurring tax: every stage that adds a new
+> controller with a generic `@Operation` summary (`create`, `list`, `close`, `register`,
+> `revoke`) reshuffles orval's un-suffixed slot, so the FE eats a one-line barrel-alias
+> edit + comment refresh on every regen. Stage 21.1 itself bit them with
+> `useClose → useClose1` and `useList2 → useList3`. This stage closes the orval-suffix
+> carry-over that's been tracked since **Stage 7**.
+
+#### Scope delivered
+
+- Added explicit `operationId = "verbNounNoun"` to every `@Operation` annotation in
+  every controller — **61 endpoints** across **15 controller classes**. Naming convention:
+  intent-revealing camelCase verbs (`list*`, `get*`, `create*`, `update*`, `activate*`,
+  `deactivate*`, `assign*`, `submit*`, `resolve*`, `close*`, `cancel*`, `register*`,
+  `revoke*`, `search*`, `reset*`, `send*`, `verify*`, `change*`, `logout*`, `login*`,
+  `mark*`, `start*`, `add*`, `refresh*`) followed by the noun phrase that scopes them.
+- A handful of endpoints had no `@Operation` at all (e.g. `getSubdivision`,
+  `updateCategory`, the activate / deactivate twins on masterdata admin controllers).
+  Added minimal `@Operation(operationId = "...", summary = "...")` on those 11 too so
+  they don't fall back to `operationId = "deactivate2"` or similar.
+- **Disambiguation** for endpoints that share a verb across roles:
+  - `closeComplaint` (engineer / admin on-behalf) vs `closeComplaintAsTechnician` (the
+    Stage 20.5 normal closer).
+  - `getStaffDirectoryEntry` (single) vs `getStaffDirectoryEntries` (batch) vs
+    `searchStaffDirectory` (paged search) — all on the same URL with different `params`
+    discriminators.
+  - `submitFeedback` (POST) vs `getFeedback` (GET) on the same path.
+  - `registerConsumerDevice` / `revokeConsumerDevice` vs
+    `registerStaffDevice` / `revokeStaffDevice` — same shape, different principal.
+- Springdoc emits each `operationId` verbatim into `docs/openapi.json`; orval
+  consumes that to name the generated hook
+  (`useRegisterConsumerDevice` instead of `useRegister`). Across stages the names now
+  stay stable regardless of declaration / scan order, so the FE barrel alias edits go
+  away.
+- Verified end-to-end: re-snapshotted `docs/openapi.json` after
+  `./mvnw verify`, parsed every `paths.*.<verb>.operationId`, asserted **0
+  numeric-suffix smells** across all 61 operations.
+
+#### Mechanics
+
+- Mapping table + Python script (`/tmp/add_op_ids.py`) anchored on each annotation's
+  summary substring to inject `operationId` as the first arg of the `@Operation(...)`
+  block — works for both single-line and multi-line forms. The 6 multi-line annotations
+  that mismatched on first pass (different exact wording) were fixed in a second pass
+  with corrected anchors. Total 62 controller-side edits, no manual per-file fiddling.
+- The script + mapping table are throwaway; not committed.
+
+#### Incidents fixed during implementation
+
+_None._ Annotations are additive; existing tests all still passed first try.
+
+#### Tests added
+
+_None._ The operationId is metadata for the OpenAPI emit + FE codegen — no runtime
+behaviour to test. The `OpenApiExportIT` re-snapshot validates the change end-to-end
+by writing `docs/openapi.json` with the new IDs; the spec-drift CI guard (still tracked
+for Phase 7) will catch any future regression on a per-PR basis.
+
+#### Build status
+
+```
+[INFO] Tests run: 175, Failures: 0, Errors: 0, Skipped: 0  (Surefire — unit; unchanged)
+[INFO] Tests run:   8, Failures: 0, Errors: 0, Skipped: 0  (Failsafe — IT;   unchanged, all green)
+[INFO] BUILD SUCCESS
+docs/openapi.json — 56 paths unchanged; every operation now carries a stable, intention-revealing operationId.
+```
+
+#### Carry-overs / known follow-ups
+
+- **Stage 21.2 fan-out heads-up for FE** — recorded as a separate todo in the FE-handoff
+  prompt for the next deploy: once `notification.service` is live in a shared dev env,
+  the FE should register a real device on that env and trigger a complaint event to
+  verify the §4 payload frame matches the mock they've been building against. Cheap
+  catch for any subtle wire divergence before Stage 21.3 (FCM impl) ossifies around the
+  console-mode console log shape. **Today the BE only runs locally**, so this is a
+  "do it the moment we have a shared deploy target" item, not actionable now.
+- **Closes the Stage 7 carry-over**: *"Orval numeric-suffix aliases (`create_1`,
+  `deactivate_2`, etc.) remain positionally brittle. Real fix is on the BE side — add
+  explicit `operationId = "createSubdivision"` (etc.)"*. ✅ closed.
+- **Spec-drift CI guard** still tracked from Stage 3 / Stage 6 / Stage 7. With stable
+  operationIds in place the diff signal-to-noise on `docs/openapi.json` is much higher —
+  the guard becomes proportionally more valuable.
+
+
 ## How to update this log
 
 1. At the end of a stage, append (or fill in) the corresponding subsection.

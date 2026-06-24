@@ -70,6 +70,7 @@ public class ConsumerComplaintController {
 
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @Operation(
+            operationId = "submitComplaint",
             summary = "Submit a new complaint with up to 3 images in a single multipart request",
             description = "Multipart contract: one JSON part named `complaint` (SubmitComplaintRequest) "
                     + "plus 0..3 image parts named `images` (image/jpeg or image/png, each ≤ 1 MB). "
@@ -94,6 +95,7 @@ public class ConsumerComplaintController {
 
     @GetMapping
     @Operation(
+            operationId = "listConsumerComplaints",
             summary = "Paged tracking list of every complaint the verified consumer has raised",
             description = "Server pins consumer_master_id = caller.consumerMasterId(). Optional "
                     + "?status=… filter. Default sort is createdAt,desc (latest first)."
@@ -108,6 +110,7 @@ public class ConsumerComplaintController {
 
     @GetMapping("/{ticketNo}")
     @Operation(
+            operationId = "getConsumerComplaint",
             summary = "Fetch the verified consumer's own complaint by ticket number",
             description = "Owner-checked. Stage 17 enriched the payload with severity, "
                     + "slaBreached, resolvedAt, closedAt. Staff identities and internal "
@@ -122,6 +125,7 @@ public class ConsumerComplaintController {
 
     @GetMapping("/{ticketNo}/history")
     @Operation(
+            operationId = "getConsumerComplaintHistory",
             summary = "Consumer-safe status-change history for an owned complaint",
             description = "Same chronological ordering as the staff endpoint, but without "
                     + "changedByUserId — consumers don't see staff IDs."
@@ -135,6 +139,7 @@ public class ConsumerComplaintController {
 
     @PostMapping("/{ticketNo}/cancel")
     @Operation(
+            operationId = "cancelComplaint",
             summary = "Cancel an owned complaint (only while status = SUBMITTED)",
             description = "Consumer-driven withdrawal. Once an engineer has assigned the "
                     + "complaint, MSEB owns the workflow and the consumer can no longer cancel "
@@ -152,6 +157,7 @@ public class ConsumerComplaintController {
 
     @PostMapping("/{ticketNo}/feedback")
     @Operation(
+            operationId = "submitFeedback",
             summary = "Submit feedback for a CLOSED complaint (one-shot, idempotent at DB level)",
             description = "Rating is 1..5; comment is optional. Allowed only after the complaint "
                     + "is CLOSED → 409 FEEDBACK_NOT_ALLOWED_YET while it's still open. One row "
@@ -169,6 +175,7 @@ public class ConsumerComplaintController {
 
     @GetMapping("/{ticketNo}/feedback")
     @Operation(
+            operationId = "getFeedback",
             summary = "Read-back the verified consumer's own feedback for a complaint (Stage 20.1)",
             description = "Returns 200 with data=null when no feedback has been submitted yet. "
                     + "Lets the FE render a read-only rating panel without try / catching the "

@@ -25,12 +25,14 @@ public class ComplaintCategoryAdminController {
     private final ComplaintCategoryService service;
 
     @PostMapping
-    @Operation(summary = "Create a complaint category")
+    @Operation(operationId = "createCategory",
+            summary = "Create a complaint category")
     public ResponseEntity<ApiResponse<ComplaintCategoryResponse>> create(
             @Valid @RequestBody ComplaintCategoryRequest req) {
         return ResponseEntity.ok(ApiResponse.ok(service.create(req)));
     }
 
+    @Operation(operationId = "updateCategory", summary = "Update a complaint category")
     @PutMapping("/{id}")
     public ResponseEntity<ApiResponse<ComplaintCategoryResponse>> update(
             @PathVariable Long id,
@@ -38,11 +40,13 @@ public class ComplaintCategoryAdminController {
         return ResponseEntity.ok(ApiResponse.ok(service.update(id, req)));
     }
 
+    @Operation(operationId = "deactivateCategory", summary = "Deactivate a complaint category")
     @PostMapping("/{id}/deactivate")
     public ResponseEntity<ApiResponse<ComplaintCategoryResponse>> deactivate(@PathVariable Long id) {
         return ResponseEntity.ok(ApiResponse.ok(service.setActive(id, false)));
     }
 
+    @Operation(operationId = "activateCategory", summary = "Activate a complaint category")
     @PostMapping("/{id}/activate")
     public ResponseEntity<ApiResponse<ComplaintCategoryResponse>> activate(@PathVariable Long id) {
         return ResponseEntity.ok(ApiResponse.ok(service.setActive(id, true)));

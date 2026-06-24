@@ -29,23 +29,27 @@ public class SubdivisionAdminController {
     private final SubdivisionService service;
 
     @PostMapping
-    @Operation(summary = "Create a new subdivision")
+    @Operation(operationId = "createSubdivision",
+            summary = "Create a new subdivision")
     public ResponseEntity<ApiResponse<SubdivisionResponse>> create(@Valid @RequestBody SubdivisionRequest req) {
         return ResponseEntity.ok(ApiResponse.ok(service.create(req)));
     }
 
     @PutMapping("/{id}")
-    @Operation(summary = "Update a subdivision")
+    @Operation(operationId = "updateSubdivision",
+            summary = "Update a subdivision")
     public ResponseEntity<ApiResponse<SubdivisionResponse>> update(
             @PathVariable Long id, @Valid @RequestBody SubdivisionRequest req) {
         return ResponseEntity.ok(ApiResponse.ok(service.update(id, req)));
     }
 
+    @Operation(operationId = "deactivateSubdivision", summary = "Deactivate a subdivision")
     @PostMapping("/{id}/deactivate")
     public ResponseEntity<ApiResponse<SubdivisionResponse>> deactivate(@PathVariable Long id) {
         return ResponseEntity.ok(ApiResponse.ok(service.setActive(id, false)));
     }
 
+    @Operation(operationId = "activateSubdivision", summary = "Activate a subdivision")
     @PostMapping("/{id}/activate")
     public ResponseEntity<ApiResponse<SubdivisionResponse>> activate(@PathVariable Long id) {
         return ResponseEntity.ok(ApiResponse.ok(service.setActive(id, true)));

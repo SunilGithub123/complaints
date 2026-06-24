@@ -31,7 +31,8 @@ public class ConsumerMasterdataReadController {
     private final ComplaintCategoryService categories;
 
     @GetMapping("/categories")
-    @Operation(summary = "List active complaint categories for the consumer submit dropdown",
+    @Operation(operationId = "listActiveCategoriesForConsumer",
+            summary = "List active complaint categories for the consumer submit dropdown",
             description = "Returns only categories where active = true. Inactive rows are never "
                     + "surfaced to consumers.")
     public ResponseEntity<ApiResponse<PageResponse<ComplaintCategoryResponse>>> listActiveCategories(
