@@ -1,9 +1,9 @@
-# Stage 21 — Device Token & Push Notification Contract (DRAFT)
+# Stage 21 — Device Token & Push Notification Contract (v1.0 FROZEN)
 
-> Status: **draft for FE sign-off**, June 2026.
-> Owner: BE. Sibling FE doc lives in `complaints-frontend/docs/` once we agree the shape.
-> Once frozen, this doc is the source of truth for Stage 21.1 (persistence + endpoints) and
-> Stage 21.2 (provider + listeners). Implementation does not start until the FE confirms.
+> Status: **FROZEN — implementing in Stage 21.1**, 2026-06-25.
+> Owner: BE. Sibling FE copy lives at `complaints-frontend/docs/STAGE_21_DEVICE_TOKEN_CONTRACT.md`
+> and is the same source of truth — both sides update together.
+> FE sign-off received 2026-06-25 with two deltas folded into §4 and §8 below.
 
 ---
 
@@ -170,19 +170,23 @@ Stage 21 sends **data-only** FCM messages (no `notification` block). Rationale:
 
 ```jsonc
 {
-  "type":         "COMPLAINT_ASSIGNED",      // see §5 for the enum
-  "ticketNo":     "MH20260600000007",
-  "complaintId":  "7",                       // sent as string — FCM data values must be strings
-  "title":        "New complaint assigned",  // English, server-rendered
-  "body":         "Ticket MH20260600000007 - HIGH severity",
-  "schemaVersion":"1"                        // bumped if we ever break the shape
+  "type":            "COMPLAINT_ASSIGNED",      // see 5 for the enum
+  "ticketNo":        "MH20260600000007",
+  "complaintId":     "7",                       // sent as string — FCM data values must be strings
+  "title":           "New complaint assigned",  // English, server-rendered
+  "body":            "Ticket MH20260600000007 - HIGH severity",
+  "eventOccurredAt": "2026-06-25T18:42:11+05:30", // ISO-8601 IST, server clock at AFTER_COMMIT
+  "schemaVersion":   "1"                        // bumped if we ever break the shape
 }
 ```
 
 - All values are strings (FCM constraint).
-- `title` and `body` are English-only in v1. **If FE wants `titleKey` / `bodyKey` /
-  `args` for client-side rendering, this is the moment to say so** — the schema bump is
-  cheaper now than after rollout.
+- `title` and `body` are English-only in v1 (FE sign-off §9.1: defer localisation to
+  Stage 22's persisted inbox; bump to `schemaVersion=2` when added).
+- **`eventOccurredAt`** is the server's IST timestamp captured at the moment the
+  `AFTER_COMMIT` listener fires — *not* the FCM send time. Lets the FE render correct
+  "n minutes ago" labels when a batch is delivered after the device was offline / killed,
+  and de-dupe against any inbox snapshot pulled on resume (added per FE sign-off 2026-06-25).
 - `schemaVersion` lets the FE fall back to a generic banner if a future BE version
   introduces a field the installed app can't parse.
 
@@ -302,32 +306,48 @@ Migration is **additive**; nothing in the existing schema changes.
 
 | Code                              | HTTP | Meaning                                                             |
 |-----------------------------------|------|---------------------------------------------------------------------|
-| `DEVICE_PLATFORM_UNSUPPORTED`     | 400  | `platform` not in `ANDROID | IOS | WEB`.                            |
+| `DEVICE_PLATFORM_UNSUPPORTED`     | 400  | `platform` not in `ANDROID \| IOS \| WEB`.                          |
 | `DEVICE_NOT_OWNED_BY_CONSUMER`    | 403  | Revoke / refresh attempted by a different consumer.                 |
 | `DEVICE_NOT_OWNED_BY_USER`        | 403  | Revoke / refresh attempted by a different staff user.               |
+| `INVALID_PUSH_TOKEN_FORMAT`       | 400  | Push token fails FCM / APNs shape validation. Distinct from `VALIDATION_FAILED` so FE can trigger a "fetch a fresh token and retry once" path. (Reserved per FE sign-off 2026-06-25.) |
+| `DEVICE_TOKEN_LIMIT_EXCEEDED`     | 409  | Per-principal device cap exceeded. No cap is enforced in Stage 21.1; the code is reserved so FE can render "Too many devices, revoke one in settings" without a contract bump when the cap lands. (Reserved per FE sign-off 2026-06-25.) |
 
-(`VALIDATION_FAILED`, `UNAUTHORIZED`, `FORBIDDEN` are reused — no new codes.)
+(`VALIDATION_FAILED`, `UNAUTHORIZED`, `FORBIDDEN` are reused — no new codes there.)
+
+Both new codes must be mirrored in `@complaints/i18n` `errorCodes.*` keys at the same
+time Stage 21.1 ships, so the generated `@complaints/api` types pick them up.
 
 ---
 
-## 9. Open questions for the FE — please confirm before BE Stage 21.1 starts
+## 9. Resolved decisions (was: open questions for the FE)
 
-1. **Localisation now or later?** Stage 21 sends English `title` / `body`. If you want
-   `titleKey` / `bodyKey` / `args` in the payload, say so before 21.0 freezes — schema
-   bump after rollout costs us a `schemaVersion=2` migration window.
-2. **Web push?** The contract enumerates `WEB` as a platform but the BE-side
-   `FcmPushService` path for web (VAPID, service worker) is a Stage 22 concern. Confirm
-   you only need `ANDROID` + `IOS` for v1 launch.
-3. **Token rotation cadence** — confirm the FE re-registers on every cold start AND on
-   FCM's `onTokenRefresh` callback. Without both, stale tokens silently rot until our
-   nightly sweep flips them.
-4. **Revoke on logout?** The FE staff-app logout flow should call `DELETE /staff/devices/
-   {deviceId}` before clearing the JWT. Same for consumer logout (if such a flow exists
-   — given the 5-min JWT it usually doesn't).
-5. **Quiet hours / DND?** Out of scope for Stage 21. Confirm OK.
-6. **Push permission UX** — FE asks at logical moments (post-submit, post-resolve), not
-   on app launch. BE assumes nothing about the prompt — we just receive the token when
-   you have one.
+Frozen 2026-06-25 — FE sign-off received. Original questions kept inline for traceability.
+
+| # | Question | Decision | Rationale (FE) |
+|---|----------|----------|----------------|
+| 9.1 | Localisation now or later? | **Later.** English-only `title` / `body` in v1. Do **not** add `titleKey` / `bodyKey` / `args` yet. | Mobile app lands Phase 4+; Stage 22's persisted-inbox row will be the display-string source of truth — localise *there*, not in the FCM data frame. Bump to `schemaVersion=2` when added. |
+| 9.2 | Web push? | **No web push in v1.** `ANDROID` + `IOS` only. Keep `WEB` in the platform enum so the contract doesn't churn, but BE ships no VAPID / service-worker path. | Consumer PWA has 5-min JWT (no anchor principal for push); staff portal users are at desks with the tab open. Defer to Stage 22+ when an inbox backs it. |
+| 9.3 | Token rotation cadence? | **Confirmed.** FE re-registers on (a) every cold start and (b) FCM `onTokenRefresh` / Expo `addPushTokenListener`. Same `device_id`, new `push_token` → refresh path (200). Never `DELETE`+`POST`. | §3.1 idempotent upsert. `DELETE`+`POST` would momentarily break the partial-unique index and lose `created_at` audit. Cold-start re-register is cheap insurance against missed `onTokenRefresh` events. |
+| 9.4 | Revoke on logout? | **Staff: yes** — `DELETE /staff/devices/{deviceId}` before clearing the JWT in the logout reducer. **Consumer: no explicit revoke** — the 5-min verify JWT expires on its own; the row stays until a different consumer registers on the same `device_id` or the user uninstalls. | Matches the `authStore` / `consumerAuthStore` split — staff has a real logout button, consumer doesn't. Failed `DELETE` on logout must **not** block JWT clear (best-effort, fire-and-forget with a timeout). |
+| 9.5 | Quiet hours / DND? | **Out of scope.** OS-level DND is sufficient for v1; in-app quiet-hours preferences belong in Stage 22 alongside the inbox / preferences screen. | — |
+| 9.6 | Push permission UX | **FE prompts at logical moments, never on launch.** Consumer: after first successful complaint submit. Staff: after first successful login post password-change gate. If denied: FE does **not** call `POST /devices` (no token to send); re-prompts at most once per 7 days (tracked client-side). If permission is *revoked later*: FE detects on next launch via `getPermissionsAsync()` and **does** call `DELETE /devices/{deviceId}` so BE stops fanning out to a dead token before the nightly sweep catches it. | No iOS App Store reviewer passes cold-launch prompts; the "we'll notify you when assigned" toast post-submit is the natural lead-in. |
+
+**Additional confirmations from FE sign-off** (no contract change required, recorded for trail):
+
+- **`device_id` storage primitives** — iOS: `expo-secure-store` (keychain,
+  `WHEN_UNLOCKED_THIS_DEVICE_ONLY`) — survives reinstall. Android: `expo-secure-store`
+  (wraps `EncryptedSharedPreferences` on API 23+) — survives reinstall on Android 12+
+  per §2.3. Web: `localStorage` under key `crs.deviceId` — lost on incognito / "Clear
+  site data" / cross-browser; a fresh UUID just creates a new device row and the old one
+  ages out via the nightly sweep.
+- **Multi-account on one device** — `(principal_kind, device_id)` model per §2.4 / §7
+  works as-is. Shared `device_id` across both auth stores; principal binding is server-side
+  at registration time via whichever JWT is presented. `authStore` and `consumerAuthStore`
+  each track their own `lastRegisteredDeviceId` flag for session-resume re-register.
+- **§5 SLA breach: once per breach, not per sweep tick** — confirmed correct call; FE has
+  no client-side de-dupe layer in v1.
+- **§6.2 never-log list** — FE will mirror in the Sentry `beforeSend` filter when Phase 7
+  observability lands.
 
 ---
 
@@ -345,11 +365,18 @@ Total ~2.5 days BE once 21.0 is signed off, fully parallel-friendly.
 
 ## 11. Versioning
 
-This doc is **version 1 (DRAFT)**. Material changes after FE sign-off bump a version
-suffix (`-v2`, `-v3`) at the top and are appended in a changelog below.
+This doc is **v1.0 FROZEN** as of 2026-06-25. Material changes after freeze bump a
+version suffix (`v1.1`, `v2.0`) at the top and are appended to the changelog below.
+Both the BE copy (`complaints/docs/`) and the FE copy
+(`complaints-frontend/docs/`) update together.
 
 ### Changelog
 
-- **2026-06-23** — initial draft, BE-side. Awaiting FE sign-off on §3 endpoints, §4
-  payload shape, §9 open questions.
+- **2026-06-25 — v1.0 FROZEN.** FE sign-off received. Two deltas folded in:
+  (1) §4 payload gains `eventOccurredAt` (ISO-8601 IST string, server clock at
+  `AFTER_COMMIT`); (2) §8 reserves `INVALID_PUSH_TOKEN_FORMAT` (400) and
+  `DEVICE_TOKEN_LIMIT_EXCEEDED` (409). §9 questions resolved with decisions recorded
+  inline. BE Stage 21.1 unblocked.
+- **2026-06-23** — initial draft, BE-side. Awaiting FE sign-off on 3 endpoints, 4
+  payload shape, 9 open questions.
 

@@ -2834,6 +2834,93 @@ preserves all prior behaviour).
   scope) and switch the close endpoint to return the detail. Defer until FE asks.
 
 
+### Stage 20.6 — Stage 21 contract frozen (v1.0) — ✅ 2026-06-25
+
+> FE sign-off received. `STAGE_21_DEVICE_TOKEN_CONTRACT.md` flipped from
+> `Status: draft for FE sign-off` to `Status: FROZEN — implementing in Stage 21.1`,
+> with two deltas folded in. BE Stage 21.1 is now unblocked.
+
+#### Scope delivered
+
+**Doc-only stage.** No production code, no schema, no migration.
+
+- Header status: **draft → FROZEN (v1.0, 2026-06-25)**. Mirror note added pointing at
+  the sibling FE copy as the same source of truth.
+- **§4 payload** — added `eventOccurredAt` (ISO-8601 IST string, server clock captured at
+  `AFTER_COMMIT`). Lets the FE render correct "n minutes ago" labels for batched
+  deliveries after the device was offline / killed, and de-dupe against an inbox snapshot
+  pulled on resume. Localisation note clarified: English-only in v1 per §9.1 decision;
+  schema bumps to `2` when `titleKey` / `bodyKey` / `args` are added in Stage 22.
+- **§8 error codes** — reserved two for the FE to start coding against without waiting
+  for the cap to land server-side:
+  - `INVALID_PUSH_TOKEN_FORMAT` (400) — distinct from `VALIDATION_FAILED` so the FE can
+    trigger a "fetch a fresh token and retry once" path on FCM / APNs shape drift.
+  - `DEVICE_TOKEN_LIMIT_EXCEEDED` (409) — reserved code only; no cap is enforced in
+    Stage 21.1. When a cap is wanted later, no contract bump is needed.
+- **§9 — converted from "Open questions" to "Resolved decisions"** as a single table.
+  Each row carries the original question, the FE decision, and the FE rationale so the
+  trail survives any future contributor asking "why?". Six decisions:
+  - 9.1 Localisation: **later** (defer to Stage 22 inbox).
+  - 9.2 Web push: **no** in v1; `WEB` enum kept for forward compat.
+  - 9.3 Token rotation: **cold start + `onTokenRefresh`**, idempotent refresh path; never
+    `DELETE`+`POST`.
+  - 9.4 Logout revoke: **staff yes, consumer no** (consumer has no logout button); failed
+    `DELETE` is fire-and-forget, never blocks JWT clear.
+  - 9.5 Quiet hours: **out of scope** (defer to Stage 22).
+  - 9.6 Permission UX: **prompt at logical moments**, not on launch; FE handles deny /
+    later-revoke with a `DELETE` only when there's a row to revoke.
+- **Additional confirmations** (no contract change required, recorded for trail): device
+  storage primitives per platform; multi-account `(principal_kind, device_id)` model;
+  SLA breach once-per-breach not per sweep tick; §6.2 never-log list mirrored in FE
+  Sentry `beforeSend` in Phase 7.
+- **§11 changelog** — entry added marking v1.0 freeze with the two folded deltas.
+- **Mirror** — `complaints-frontend/docs/STAGE_21_DEVICE_TOKEN_CONTRACT.md` overwritten
+  with the frozen copy. `diff -q` confirms byte-identical.
+
+#### Incidents fixed during implementation
+
+_None — process / coordination entry._
+
+#### Tests added
+
+_None — no production code touched._
+
+#### Build status
+
+- No build / test deltas. Counts unchanged since Stage 20.5: **152 unit + 8 IT**,
+  OpenAPI **52 paths**.
+
+#### Carry-overs / known follow-ups (next stage queue)
+
+- **Stage 21.1 — schema + endpoints.** Now unblocked. Scope:
+  - Flyway `V1.5__device_token.sql` per §7 (table + partial-unique on
+    `(principal_kind, device_id) WHERE active`, indexes per §7).
+  - Four REST endpoints: `POST /api/v1/consumer/devices`,
+    `DELETE /api/v1/consumer/devices/{deviceId}`,
+    `POST /api/v1/staff/devices`, `DELETE /api/v1/staff/devices/{deviceId}`.
+  - `DeviceTokenService` + hand-written mapper + DTOs (`DeviceRegistrationRequest`,
+    `DeviceTokenResponse`). Idempotent upsert behaviour per §3.1.
+  - Five new `ErrorCode` entries: `DEVICE_PLATFORM_UNSUPPORTED`,
+    `DEVICE_NOT_OWNED_BY_CONSUMER`, `DEVICE_NOT_OWNED_BY_USER`,
+    `INVALID_PUSH_TOKEN_FORMAT`, `DEVICE_TOKEN_LIMIT_EXCEEDED` (last one wired but never
+    thrown yet — reserved per §8).
+  - Tests per minimum-test policy: 1 happy + 1 unhappy per service method + 1
+    `@WebMvcTest` per endpoint cluster.
+- **Stage 21.2 — provider + listeners** (after 21.1). `PushService` interface +
+  `ConsolePushService` (dev) + `FcmPushService` (prod) + nine
+  `@TransactionalEventListener(phase = AFTER_COMMIT)` methods, one per `ComplaintEvent`
+  type per §5. SLA breach listener fires once per breach (not per sweep tick) — the
+  Stage 20 event is already published only on the flip transition, so this is automatic.
+- **Stage 22** — persisted in-app notification inbox + per-user read state + localisation
+  bump to `schemaVersion=2`. Independent of Stage 21 once the contract is live.
+- **FE side** — `@complaints/i18n` `errorCodes.INVALID_PUSH_TOKEN_FORMAT` and
+  `errorCodes.DEVICE_TOKEN_LIMIT_EXCEEDED` keys must be added in the same FE PR that
+  consumes the Stage 21.1 OpenAPI snapshot. Tracked in the FE log.
+- **Filler work while FE wires Stage 21.1 register flow** — same Phase 7 ops chores list
+  as Stage 20.4 (git SHA in `/actuator/info`, JSON log layout, Caffeine metrics) is still
+  the right backstop if Stage 21.1 + 21.2 ship faster than the FE can absorb.
+
+
 ## How to update this log
 
 1. At the end of a stage, append (or fill in) the corresponding subsection.
