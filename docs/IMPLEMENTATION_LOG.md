@@ -3407,6 +3407,73 @@ docs/openapi.json — 56 paths, unchanged (sweep is internal; no endpoint added)
   WHERE active` in a follow-up migration. Tracked, not blocking.
 
 
+### Stage 21.2.3 — Contract patch v1.0.1 (WEB-platform clarification) — ✅ 2026-06-25
+
+> Doc-only patch. FE caught two ambiguities in the Stage 21.2.2 update prompt:
+> (a) my "Stage 21.3 staff side (apps/web)" wording contradicted §9.2's "no web push
+> in v1", and (b) the contract never said what happens server-side if FE POSTs a
+> register with `platform: "WEB"`. Both resolved in the contract, no code change.
+
+#### What shipped
+
+- **`docs/STAGE_21_DEVICE_TOKEN_CONTRACT.md` → v1.0.1.** Header version bumped,
+  §2.3 gained a "WEB platform behaviour in v1" block, §11 versioning line updated,
+  changelog entry added at the top. Mirrored byte-identical to
+  `complaints-frontend/docs/STAGE_21_DEVICE_TOKEN_CONTRACT.md` (`diff -q` clean).
+
+#### The decisions documented
+
+1. **Register with `platform: "WEB"` is accepted (201/200), no shape diff.** We do not
+   reject. Reasoning: rejecting would create a runtime-vs-contract mismatch with §2.3
+   keeping `WEB` in the enum and force FE to gate the call on
+   `platform !== "WEB"`, which leaks the v1 push-stack decision into FE code.
+2. **A registered WEB row is a no-op recipient until Stage 22+** adds a web-push
+   provider. The listener iterates active rows and dispatches via `PushService`; no
+   v1 `PushService` impl delivers to WEB, so the row sits silent — same outcome as a
+   mobile token FCM has marked inactive.
+3. **`INVALID_PUSH_TOKEN_FORMAT` stays scoped to actual shape failures**
+   (truncated FCM/APNs tokens). It is *not* a "you sent WEB platform" police code —
+   that is a deferred-feature decision, not an input-validation failure.
+4. **Staff web portal (`apps/web/staff`) has no push surface in v1** and should not
+   call `registerStaffDevice` at all. Staff push lands on `apps/mobile` only. Fixes
+   the wording bug in the Stage 21.2.2 BE → FE prompt.
+
+#### Why a doc patch and not a full version bump
+
+No wire change, no DB change, no error-code change. Behaviour was already shipped
+correctly in Stage 21.1 (the register surface doesn't differentiate by platform) and
+Stage 21.2 (the fan-out has no WEB branch); we just hadn't written down *why*. A v1.1
+bump would over-signal a semantic change that isn't there. v1.0.1 is the honest
+version label for "doc-only clarification of behaviour already frozen".
+
+#### Tests added
+
+_None._ No code changed. The behaviour described in the patch is already covered by
+the existing `DeviceTokenServiceTest` happy-path tests, which don't check the platform
+value at register time.
+
+#### Build status
+
+```
+[INFO] Tests run: 177, Failures: 0, Errors: 0, Skipped: 0  (Surefire — unit; unchanged)
+[INFO] Tests run:   8, Failures: 0, Errors: 0, Skipped: 0  (Failsafe — IT;   unchanged)
+[INFO] BUILD SUCCESS
+docs/openapi.json — 56 paths unchanged.
+```
+
+#### Carry-overs / known follow-ups
+
+- **Stage 21.3 BE — real `FcmPushService`** still gated on GCP service-account JSON
+  for staging. Unchanged from Stage 21.2.2.
+- **Web push design (§9.2 reopen)** lands no earlier than Stage 22+ alongside the
+  persisted-inbox row. When it does, the work is:
+  (a) VAPID key pair + service-worker push subscription on FE,
+  (b) a `WebPushService` impl on BE (probably `web-push` Java port or direct VAPID
+  HTTP push), and
+  (c) wire `WEB` rows into the listener fan-out. The contract's §2.3 already accepts
+  WEB rows, so no additive migration is needed at the schema layer.
+
+
 ## How to update this log
 
 1. At the end of a stage, append (or fill in) the corresponding subsection.

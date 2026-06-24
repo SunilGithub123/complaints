@@ -1,6 +1,7 @@
-# Stage 21 — Device Token & Push Notification Contract (v1.0 FROZEN)
+# Stage 21 — Device Token & Push Notification Contract (v1.0.1 FROZEN)
 
 > Status: **FROZEN — implementing in Stage 21.1**, 2026-06-25.
+> Patch 2026-06-25 (v1.0.1): §2.3 WEB-platform behaviour clarified (doc-only, no wire change).
 > Owner: BE. Sibling FE copy lives at `complaints-frontend/docs/STAGE_21_DEVICE_TOKEN_CONTRACT.md`
 > and is the same source of truth — both sides update together.
 > FE sign-off received 2026-06-25 with two deltas folded into §4 and §8 below.
@@ -63,6 +64,29 @@ verified.
 The FE generates the UUID on first launch and reuses it forever. Re-registering the same
 `device_id` with a new `push_token` is the **token-rotation** path (FCM / APNs rotate
 tokens silently and we must not orphan the old row).
+
+**WEB platform behaviour in v1 (added in v1.0.1):**
+Per §9.2 there is **no web push in v1** — neither VAPID nor a service worker is in
+scope. The `WEB` enum value stays in the contract to avoid churn when web push lands
+(Stage 22+), but the server-side semantics today are:
+
+- **Register (`POST /devices` with `platform: "WEB"`):** accepted, row persists, no
+  shape validation difference vs ANDROID/IOS. We do not reject — rejecting would create
+  a runtime-vs-contract mismatch and force the FE to gate the call on `platform !==
+  "WEB"`, which leaks the v1 push-stack decision into the FE.
+- **Fan-out:** the listener iterates active rows and dispatches via `PushService`. In
+  v1 there is no `PushService` impl that knows how to deliver to a `WEB` row, so a WEB
+  row is effectively a **no-op recipient** — the same outcome as a mobile token that
+  FCM has marked inactive. When Stage 22+ adds a web push provider, only the provider
+  impl needs the platform branch; the listener and register surface stay identical.
+- **`INVALID_PUSH_TOKEN_FORMAT` (§8)** remains scoped to actual shape failures
+  (truncated FCM/APNs token strings). It is **not** used to police "you sent a WEB
+  platform" — that is a deferred-feature decision, not an input-validation failure.
+- **FE guidance:** the only place that should be calling register with `platform:
+  "WEB"` today is the consumer PWA (`apps/web`) and only if it has actually obtained a
+  push token via a future VAPID flow. The staff web portal (`apps/web/staff`) has no
+  native push surface in v1 and should not call register at all — staff push lands on
+  `apps/mobile` only.
 
 ### 2.4 Multi-account on one device
 
@@ -365,13 +389,20 @@ Total ~2.5 days BE once 21.0 is signed off, fully parallel-friendly.
 
 ## 11. Versioning
 
-This doc is **v1.0 FROZEN** as of 2026-06-25. Material changes after freeze bump a
-version suffix (`v1.1`, `v2.0`) at the top and are appended to the changelog below.
-Both the BE copy (`complaints/docs/`) and the FE copy
+This doc is **v1.0.1 FROZEN** as of 2026-06-25 (v1.0 froze the contract; v1.0.1 is a
+doc-only clarification of WEB-platform behaviour, no wire change). Material changes
+after freeze bump a version suffix (`v1.1`, `v2.0`) at the top and are appended to the
+changelog below. Both the BE copy (`complaints/docs/`) and the FE copy
 (`complaints-frontend/docs/`) update together.
 
 ### Changelog
 
+- **2026-06-25 — v1.0.1 (doc-only patch).** §2.3 clarified WEB-platform behaviour in
+  v1 after FE caught an ambiguity: register with `platform: "WEB"` is accepted but the
+  fan-out has no `PushService` impl for WEB until Stage 22+ adds one; staff web portal
+  has no push surface in v1 and should not call register. No wire change, no DB change,
+  no error-code change — purely a clarification of behaviour already shipped in Stage
+  21.1 / 21.2. Resolves the FE ask about "staff web register/revoke is pure ceremony".
 - **2026-06-25 — v1.0 FROZEN.** FE sign-off received. Two deltas folded in:
   (1) §4 payload gains `eventOccurredAt` (ISO-8601 IST string, server clock at
   `AFTER_COMMIT`); (2) §8 reserves `INVALID_PUSH_TOKEN_FORMAT` (400) and
