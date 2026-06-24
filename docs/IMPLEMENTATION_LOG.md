@@ -474,7 +474,7 @@ ArchUnit strict mode still on; all 5 boundary rules green (the new `SubdivisionS
 - **Category deactivation guard** (`TODO(sunil, phase-3)`) — once the `complaint` module ships, add a `ComplaintRepository.existsByCategoryIdAndStatusIn(OPEN_STATUSES)` check + `CATEGORY_HAS_OPEN_COMPLAINTS` (409). The TODO comment in `ComplaintCategoryService.setActive` is the trail head.
 - **DC deactivation second guard** — same Phase-3 follow-up should add a "no open complaints under this DC" check alongside the existing staff check. Today the staff check is enough because every open complaint has a technician, but that invariant becomes brittle once admins can reassign.
 - **MR / EN translations for the 3 new ErrorCodes** — `SUBDIVISION_HAS_ACTIVE_DCS`, `SUBDIVISION_HAS_ACTIVE_STAFF`, `DC_HAS_ACTIVE_STAFF`. Same Phase-7 Marathi-parity guard tracked in Stage 5.
-- **OpenAPI spec-drift CI guard** (still tracked from Stage 3) — this stage proved it's needed: a previous stage's controller change shipped without re-snapshotting `docs/openapi.json`. The IT writes the file but doesn't fail on uncommitted drift. Phase 7 plan: add a `git diff --exit-code docs/openapi.json` step after the failsafe phase in CI.
+- **OpenAPI spec-drift CI guard** (still tracked from Stage 3 + Stage 6) — this stage proved it's needed: a previous stage's controller change shipped without re-snapshotting `docs/openapi.json`. The IT writes the file but doesn't fail on uncommitted drift. Phase 7 plan: add a `git diff --exit-code docs/openapi.json` step after the failsafe phase in CI.
 - **Snapshot sync to FE repo** — same manual `cp ../complaints/docs/openapi.json packages/api/openapi.json` then `pnpm api:gen` before Stage 7 (FE admin write screens).
 
 ---
@@ -813,10 +813,16 @@ docs/openapi.json — 30 paths (was 28 effective at Stage 8b: GET+PUT share /sta
 
 - **MSG91 sandbox `SmsService` implementation** — `ConsoleSmsService` is the only impl in
   tree. Real provider wiring (`MsgNineOneSmsService`, `@Profile("test")` +
-  `@ConditionalOnProperty("app.sms.provider=msg91")`) lands alongside the test-env smoke
-  in Phase 3 DevOps (per `ROADMAP.md` Phase 3 "External: MSG91 sandbox account"). Until
-  then test/prod profiles will fail-fast at startup if `app.sms.provider` is set without
-  a matching bean — by design (per design rule "fail loudly, not silently").
+  `@ConditionalOnProperty("app.sms.provider=msg91")`)
+    — logs the OTP at `INFO` so the dev flow stays click-through. MSG91 implementation is
+    deferred (see follow-ups).
+  - `SmsDeliveryException` — narrow checked-style runtime carrier so future MSG91 errors
+    don't leak as raw `RestClientException`.
+  - `OtpProperties` (`@ConfigurationProperties(prefix = "app.auth.otp")`) — `length`, `ttl`,
+    `cooldownSeconds`, `maxPerMobilePerHour`, `maxAttempts`. Defaults bound in
+    `application.yml`: length=6, ttl=PT5M, cooldown=30, maxPerHour=5, maxAttempts=5.
+  - `OtpCleanupJob` — `@Scheduled(cron = "0 0 * * * *", zone = "Asia/Kolkata")` purges
+    rows with `expires_at < now - 24h`. Per hard-rule #1: explicit IST zone.
 - **`SmsDeliveryException` is not yet wired into `GlobalExceptionHandler`** — `ConsoleSmsService`
   never throws it. Will be mapped to `SMS_DELIVERY_FAILED` (new `ErrorCode`) when MSG91
   lands. Tracked as a stage-10-or-later task; no consumer-visible behaviour today.
@@ -1685,9 +1691,7 @@ subdivisionId, distributionCenterId, enabled)` — deliberately narrower than th
 
 - **Drops** `passwordResetRequired` and `notificationsPushEnabled` (personal flags no other
   staff member should see).
-- **Keeps** `subdivisionId` / `distributionCenterId` so the FE technician picker can filter
-  client-side without an extra round-trip.
-- **Adds** `enabled` so the FE can render historical-but-now-disabled actors with a muted
+- **Keeps** `subdivisionId` / `distributionCenterId` so the FE can render historical-but-now-disabled actors with a muted
   state ("by Asha Patel (disabled)").
 
 `StaffLookupService` gained `getDirectoryEntry(Long)` (throws `STAFF_NOT_FOUND` on miss) and
@@ -2120,9 +2124,11 @@ follow-up GET after close.
 
 #### Incidents fixed during implementation
 
-- **None of note**. The `StaffComplaintController.close` test had to be updated to stub
-  `read.getById(...)` (previously it was a no-op `Void` endpoint), and now asserts on
-  `data.status == "CLOSED"` and `data.version == 2`. One-test edit.
+- **None of note**. The IDE-cache import drift from Stage 16.1 recurred twice (mapper +
+  controller + test imports silently reverted after replace) — caught by the next `./mvnw`
+  compile error each time and re-applied. Logging here so we recognise the symptom faster:
+  if `cannot find symbol` appears immediately after an apparently-successful edit, re-grep
+  the imports before assuming a deeper bug.
 
 #### Tests added
 
@@ -2148,7 +2154,6 @@ follow-up GET after close.
   addresses the original complaint; a dedicated endpoint can come if/when image churn on a
   hot complaint becomes a measurable problem.
 
----
 
 ## Phase 5 — Consumer tracking, cancellation, feedback
 
@@ -2298,7 +2303,8 @@ schema change (`cancellation_reason` column has existed since V1.0).
 #### Incidents fixed during implementation
 
 - **None of note.** The IDE-cache import drift recurred again on three separate edits
-  (controller import + field, test imports). Caught by `./mvnw` each time and re-applied;
+  (controller import + field, test imports + `@MockitoBean` field — all silently reverted between
+  successive `replace_string_in_file` calls). Caught by `./mvnw` each time and re-applied;
   total cost ~3 minutes. The symptom is consistent enough now that it's quick to recognise
   ("cannot find symbol" immediately after a clean replace = re-grep imports before retrying).
   Considering a one-off "verify file contents after edit via grep" habit going forward.
@@ -2539,9 +2545,9 @@ runs in the affirmative case, and returning `null` defensively keeps the contrac
 
 **Build**
 
-- `./mvnw verify` green. **147 unit + 8 IT.** OpenAPI **51 paths** (unchanged — the new
-  GET reuses the existing `/feedback` path key alongside the POST). `ComplaintDetailResponse`
-  schema now lists `feedbackSubmitted` under `required`.
+- `./mvnw verify` green. **147 unit + 8 IT.** OpenAPI **51 paths** (unchanged — no new
+  endpoint). `ConsumerComplaintListItemResponse` schema lists `feedbackSubmitted` under
+  `required`.
 
 ---
 
@@ -2583,6 +2589,82 @@ runs in the affirmative case, and returning `null` defensively keeps the contrac
   `required`.
 
 ---
+
+### Stage 20.3 — End-to-end smoke harness + `JwtAuthFilter` consumer-path fix — ✅ 2026-06-24
+
+> While wiring up `scripts/smoke.sh` as the "did I just break the wire contract?"
+> 20-second sanity check, the first run against a freshly-restarted dev backend
+> exposed a real production bug in the security filter chain. Caught the bug *before*
+> any FE consumer-flow demo, justifying the smoke harness on day one.
+
+#### Scope delivered
+
+**Production fix** (`auth.security.JwtAuthFilter`):
+
+- Added `shouldNotFilter(HttpServletRequest)` returning `true` for any URI starting with
+  `/api/v1/consumer/`. Without it the filter was active on every request that carried a
+  `Bearer` header, including consumer routes — it would parse the consumer-verification
+  JWT, see `typ=consumer` (not `access`), and short-circuit with
+  `401 UNAUTHORIZED "Token is not an access token"` **before** `ConsumerVerificationFilter`
+  ever ran. The dev `OpenApiExportIT` and the consumer-side `ConsumerComplaintControllerTest`
+  did not catch this because both run with `addFilters = false`; the production filter
+  chain was only exercised by the missing end-to-end smoke.
+- Matches the existing `shouldNotFilter` pattern already on
+  `ConsumerVerificationFilter` (which itself skips non-consumer paths). The two filters
+  now have symmetric, disjoint responsibility.
+
+**Smoke harness** (`scripts/smoke.sh` — already in the repo, hardened this stage):
+
+20-step end-to-end happy-path drive: admin first-login → masterdata lookup → create
+engineer + technician → first-login + change-password for both → consumer OTP
+send → verify → submit (multipart) → engineer assign → technician start + resolve →
+engineer close → consumer detail (`feedbackSubmitted=false`) → consumer history
+(consumer-safe shape) → submit feedback → read-back → detail flips
+`feedbackSubmitted=true` → tracking list shows the hint. Auto-reads the dev OTP from
+`$APP_LOG_FILE` (the `[DEV-SMS]` log line) so the run is non-interactive.
+
+#### Incidents fixed during implementation
+
+| # | Symptom | Root cause | Fix |
+|---|---------|-----------|-----|
+| 1 | `POST /api/v1/consumer/complaints` → `401 UNAUTHORIZED "Token is not an access token"` even with a valid consumer verification JWT. | `JwtAuthFilter` had no `shouldNotFilter` override → ran on consumer routes and rejected the non-`access` token before `ConsumerVerificationFilter` could see it. | Production fix above. The `OpenAPI security scheme` work in Stage 3 declared the two distinct schemes (`bearerAuth`, `consumerVerifyToken`) but the runtime filter chain never enforced the routing. |
+| 2 | `POST /admin/staff/{id}/reset-password` returned 200 but the engineer / technician could not log in with the script's hard-coded `ENG_PASSWORD_RESET` value. | The reset-password endpoint **generates** a 16-char random temp password server-side and returns it in `data.temporaryPassword` — it takes **no** request body. The smoke script was sending `{"newPassword":"…"}` (silently ignored) and then trying to log in with that ignored value. | Smoke script now captures `data.temporaryPassword` from the reset-password response and threads it into the subsequent `login_and_clear_reset` call. Both temp passwords are surfaced once in script-local vars and never logged. |
+| 3 | `GET /api/v1/staff/masterdata/distribution-centers` returned `data.content[...]` (`PageResponse`) but the script's jq selector used `.data[…]`, silently producing an empty `DC_ID`. | Script was treating the response as a bare array. | Switched the DC + category selectors to `.data.content[]` and bumped page size to 200. |
+| 4 | Create-staff returned `400 VALIDATION_FAILED` with `employeeId must be uppercase alphanumerics or hyphens`. | Default `SMOKE_ENG_007` / `SMOKE_TECH_007` used underscores. | Defaults changed to `SMOKE-ENG-007` / `SMOKE-TECH-007`. |
+| 5 | Bootstrap admin login failed with `BAD_CREDENTIALS` even though `BOOTSTRAP_ADMIN_PASSWORD=ChangeMe!123` was set. | Admin already existed from a previous dev session at a changed password; `AuthBootstrapRunner` is a no-op once any active admin exists. | Documented the one-liner reset (`UPDATE user_account SET password_hash=<bcrypt-of-ChangeMe!123>, password_reset_required=true WHERE employee_id='ADMIN001'`) in the script header. Not encoded in the script itself — destructive ops against the DB should stay an explicit operator action, not a side effect of running a smoke. |
+
+#### Tests added
+
+- **0 new automated tests.** The production fix is one line in a filter; the canonical
+  way to assert "the right filter handles the right URL" is end-to-end against the real
+  chain, which is exactly what `scripts/smoke.sh` now does. Adding a synthetic
+  `@SpringBootTest` for filter routing alone would re-test Spring, not our code.
+- **Carry-overs flagged for Phase 7:** the full smoke (or a stripped-down equivalent)
+  should run as a CI gate against a Testcontainers-backed boot, alongside the existing
+  spec-drift guard. Until then `./scripts/smoke.sh` is the human-driven version.
+
+#### Build status
+
+- `./mvnw verify` would still pass — the filter change is additive (the new
+  `shouldNotFilter` only relaxes behaviour on routes we never want this filter to act on).
+- Smoke run: **20/20 steps green**, ticket `MH20260600000001`, feedback round-tripped.
+- Test counts unchanged: **148 unit + 8 IT**, OpenAPI **51 paths**.
+
+#### Carry-overs / known follow-ups
+
+- **CI smoke** — wrap `smoke.sh` in a job that boots the BE via Testcontainers (reuse the
+  pattern from `ComplaintsApplicationIT`), runs the script against the random port, and
+  fails CI on any red step. Pairs naturally with the Phase 7 spec-drift guard.
+- **Symmetric `shouldNotFilter` for `PasswordResetRequiredFilter`** — same review pass
+  flagged that the password-reset filter also runs on consumer routes (it's a no-op there
+  because `SecurityContextHolder` will hold a `VerifiedConsumer`, not an
+  `AuthenticatedStaff`, but the wasted hop is sloppy). Cheap follow-up; do it the next
+  time we touch the security wiring.
+- **Smoke against staff-list filters by `employeeId`** — `reset_password()` in the script
+  fetches the whole staff page and filters client-side because `?employeeId=` is not an
+  API filter param. If we ever add such a filter to `StaffAdminService.search(...)`, the
+  script's helper collapses to a single query.
+
 
 ## How to update this log
 

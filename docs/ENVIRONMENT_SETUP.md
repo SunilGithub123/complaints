@@ -69,6 +69,18 @@ On subsequent runs the env vars are not required (the runner is a no-op once any
 - Actuator health: <http://localhost:8080/actuator/health>
 - Logs: console (OTP mock will print to console)
 - Log in via Swagger using `POST /auth/login` with the bootstrap admin credentials above.
+- **End-to-end smoke**: `./scripts/smoke.sh` drives the full happy path
+  (admin login → engineer + tech bootstrap → consumer OTP → submit → assign →
+  start → resolve → close → feedback → read-back) in one shot. Requires `jq`.
+  To skip the interactive OTP prompt, boot the app with stdout redirected and
+  point the script at the log file:
+  ```bash
+  ./mvnw spring-boot:run -Dspring-boot.run.profiles=dev > /tmp/complaints.log 2>&1 &
+  APP_LOG_FILE=/tmp/complaints.log ./scripts/smoke.sh
+  ```
+  Exits non-zero on the first failing step with the response body dumped.
+  Idempotent: re-running on a non-clean DB reuses the staff rows it created
+  before (deterministic employee IDs `SMOKE_ENG_007` / `SMOKE_TECH_007`).
 
 ### 1.5 Stop
 ```bash

@@ -37,6 +37,13 @@ public class JwtAuthFilter extends OncePerRequestFilter {
 
     private static final Logger log = LoggerFactory.getLogger(JwtAuthFilter.class);
     private static final String BEARER = "Bearer ";
+    /**
+     * Consumer routes carry a consumer-verification token, not a staff access token.
+     * {@link ConsumerVerificationFilter} handles them; we must not intercept them here
+     * or we will reject the consumer JWT as "not an access token" before the right filter
+     * ever sees it.
+     */
+    private static final String CONSUMER_PATH_PREFIX = "/api/v1/consumer/";
 
     private final JwtFactory jwtFactory;
     private final ObjectMapper objectMapper;
@@ -44,6 +51,11 @@ public class JwtAuthFilter extends OncePerRequestFilter {
     public JwtAuthFilter(JwtFactory jwtFactory, ObjectMapper objectMapper) {
         this.jwtFactory = jwtFactory;
         this.objectMapper = objectMapper;
+    }
+
+    @Override
+    protected boolean shouldNotFilter(HttpServletRequest request) {
+        return request.getRequestURI().startsWith(CONSUMER_PATH_PREFIX);
     }
 
     @Override
