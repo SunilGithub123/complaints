@@ -774,29 +774,7 @@ committed `V<x.y>__…sql` file.
 
 #### Tests added
 
-Minimum-test policy applied: 1 happy + 1 unhappy per service method / endpoint.
-
-- `auth/service/OtpServiceTest` — 8 tests:
-  - `sendOtp` happy (row persisted, SmsService invoked, raw OTP not in record).
-  - `sendOtp` rejects within 30s cooldown.
-  - `sendOtp` rejects on 6th send within an hour.
-  - `sendOtp` rejects when consumer inactive.
-  - `verifyOtp` happy (row consumed, JWT minted with consumer claims).
-  - `verifyOtp` rejects wrong OTP and increments `attempts`.
-  - `verifyOtp` marks row consumed on the 5th wrong attempt and rejects further use.
-  - `verifyOtp` rejects when body's `consumerId` does not match the row's.
-- `auth/security/ConsumerVerificationFilterTest` — 4 tests:
-  - Valid token → request reaches downstream + `ConsumerPrincipal` attribute populated.
-  - Missing `Authorization` header → 401 with `CONSUMER_VERIFICATION_REQUIRED`.
-  - Expired token → 401 with `CONSUMER_VERIFICATION_REQUIRED`.
-  - Staff access token rejected (wrong `typ` claim) → 401.
-- `auth/controller/ConsumerAuthControllerTest` (WebMvcTest, `addFilters=false`) — 4 tests:
-  - `POST /otp/send` happy → 200 envelope.
-  - `POST /otp/send` blank consumerId → 400 + `VALIDATION_FAILED`.
-  - `POST /otp/verify` happy → 200 + token + IST `expiresAt`.
-  - `POST /otp/verify` mismatched consumerId → 400 + `OTP_INVALID`.
-- `auth/service/OtpRateLimitIT` (Testcontainers) — 1 IT covering the rate-limit window
-  (closes incident #3 above).
+- `openapi/OpenApiExportIT` — 1 IT. Both an assertion (`200`, body contains `"openapi"`) **and** a build-artifact producer (writes `docs/openapi.json`). Running `./mvnw verify` keeps the snapshot in sync with the live spec; CI will fail if the spec stops being valid JSON or the server stops booting. No unit tests — there is no business logic to mock; the value is in the live spec round-trip.
 
 #### Build status
 
@@ -2664,6 +2642,196 @@ engineer close → consumer detail (`feedbackSubmitted=false`) → consumer hist
   fetches the whole staff page and filters client-side because `?employeeId=` is not an
   API filter param. If we ever add such a filter to `StaffAdminService.search(...)`, the
   script's helper collapses to a single query.
+
+### Stage 20.4 — Stage 21 contract handed to FE for sign-off + closure-authz gap recorded — ✅ 2026-06-25
+
+> No code shipped this stage. Process / coordination entry, plus one spec-vs-code gap
+> uncovered during a sanity audit of the smoke run, recorded so it doesn't get lost
+> while the BE waits on FE.
+
+#### Scope delivered
+
+**Stage 21 contract handoff** (push notifications / device tokens):
+
+- `docs/STAGE_21_DEVICE_TOKEN_CONTRACT.md` (BE-authored draft, 11 sections, ~350 lines)
+  copied as-is into the sibling FE repo at the same path under `complaints-frontend/docs/`.
+- FE prompted to (a) read it end-to-end, (b) answer every open question in §9
+  ("Open questions for the FE") with a one-line justification per answer, and
+  (c) flag any disagreement with §2–§7 before BE writes any code.
+- **BE is parked on Stage 21.** No schema, no endpoints, no `PushService` — implementation
+  starts only after the FE answer arrives and the doc is flipped from
+  `Status: draft for FE sign-off` to `Status: FROZEN — implementing in Stage 21.1`.
+- This matches the parallel-track discipline we've used through Stages 7, 11, 16.1, 20.1,
+  20.2 — the contract freezes **before** code on either side.
+
+**Closure-authorisation gap recorded** (no code change yet, documentation only):
+
+- Sanity audit of the Stage 20.3 smoke run flagged that engineer closed the complaint,
+  which works in the current code but **does not match the BRD**. BRD §4.2 (Technician
+  role) and §4.8 (Resolution & Closure) say the technician is the *normal* closer and
+  engineer / admin is the *on-behalf* fallback. `TECHNICAL_DESIGN.md` §6 line 366 already
+  documents `POST /technician/complaints/{id}/close`, with `slaBreachReason` mandatory
+  when `sla_breached = true`. The code, however, only exposes the staff close path
+  (`/api/v1/staff/complaints/{id}/close`, restricted to ENGINEER / ADMIN by
+  `SecurityConfig` line 60), and `ComplaintScopeGuard` actively throws `FORBIDDEN` for
+  `TECHNICIAN`. Today's state: technicians can resolve, but **cannot close**.
+- **Decision (BRD-faithful, no doc edits required):** ship a Stage 21.x sub-stage to add
+  the technician-close path. Policy stays exactly as BRD §4.8 already states — technician
+  closes own assigned complaint as the normal path; engineer / admin keep the on-behalf
+  fallback; `slaBreachReason` mandatory from whoever closes when `sla_breached = true`.
+- BRD and `TECHNICAL_DESIGN.md` already say this verbatim — confirmed in this audit, no
+  amendments needed.
+
+#### Incidents fixed during implementation
+
+_None — process / coordination entry._
+
+#### Tests added
+
+_None — no production code touched this stage._
+
+#### Build status
+
+- No build / test deltas. Counts unchanged: **148 unit + 8 IT**, OpenAPI **51 paths**.
+- Smoke run state unchanged from Stage 20.3 (20/20 green).
+
+#### Carry-overs / known follow-ups
+
+- **Stage 21 — blocked on FE.** Waiting on FE's §9 answers. Resume Stage 21.1 (schema
+  `V1.5__device_token.sql` + four REST endpoints + `DeviceTokenService`) the moment the
+  contract is frozen.
+- **Stage 21.x — technician-close endpoint.** Add `POST /api/v1/technician/complaints/{id}/close`
+  with body `{ slaBreachReason? }`. Scope check is **assigned-technician-only**
+  (`complaint.assignedTechnicianId == caller.userId()`) — *not* the DC scope used by the
+  engineer / admin path, so a new branch in `ComplaintScopeGuard` (or a sibling
+  `requireAssignedTechnician(...)` helper, depending on which reads cleaner). Reuse the
+  existing SLA-breach-reason gate in `ComplaintClosureService` so the same rule applies
+  to all three actors. Tests: 1 happy (technician closes own RESOLVED complaint) + 1
+  unhappy (technician tries to close someone else's → `COMPLAINT_OUT_OF_SCOPE`) + 1
+  unhappy (breached complaint, missing `slaBreachReason` → `SLA_BREACH_REASON_REQUIRED`).
+- **Optional tightening — `TECHNICAL_DESIGN.md` line 355.** The staff close-endpoint
+  description currently says "Allowed from `IN_PROGRESS` or `RESOLVED`; also from
+  `SUBMITTED`/`ASSIGNED` only when `sla_breached = true`…" — but the state machine
+  (`ComplaintStatusTransition`) only allows `RESOLVED → CLOSED`. Either tighten the doc
+  to match the code (recommended), or widen the state machine in a future stage if the
+  closed-from-earlier-state path is ever genuinely needed for SLA-breach triage. Do the
+  doc tightening at the same time as the technician-close stage above.
+- **Filler work while BE is parked on Stage 21** — pick from Phase 7 ops chores that
+  don't touch the wire contract: git SHA in `/actuator/info`, cache hit/miss metrics on
+  `/actuator/prometheus`, JSON log layout in the prod profile. Each is independent and
+  can land in any order.
+
+
+### Stage 20.5 — Technician close path (BRD §4.8 parity) — ✅ 2026-06-25
+
+> Closes the closure-authorisation gap recorded in Stage 20.4. The BRD has always said the
+> technician is the *normal* closer; the code shipped in Stage 14 only exposed the
+> engineer/admin on-behalf path. This stage adds the technician path so the code matches
+> the doc.
+
+#### Scope delivered
+
+**Production code**
+
+- **`ComplaintClosureService` refactor** — extracted private `doClose(c, caller, req)`
+  carrying the state transition + SLA-breach-reason gate + history append + event publish.
+  Two public entry-points now share it:
+  - `close(AuthenticatedStaff, Long, CloseComplaintRequest)` — engineer / admin on-behalf
+    (unchanged behaviour, still uses `ComplaintScopeGuard.requireInScope(...)`).
+  - **`closeByTechnician(AuthenticatedStaff, Long, CloseComplaintRequest)`** — new entry-point.
+    Scope check is `complaint.assignedTechnicianId == caller.userId()`; mismatch throws the
+    existing `COMPLAINT_NOT_ASSIGNED_TO_TECHNICIAN` (403). Same SLA-breach-reason rule applies
+    to both paths — required when `sla_breached = true` and no reason was captured at resolve.
+- **`TechnicianComplaintController`** gained `POST /api/v1/technician/complaints/{id}/close`
+  with body `CloseComplaintRequest`. Role gate is the existing `/api/v1/technician/**` →
+  `hasRole("TECHNICIAN")` matcher in `SecurityConfig`; per-complaint scope is enforced by the
+  service.
+- **State machine unchanged** — `ComplaintStatusTransition` already allowed `RESOLVED → CLOSED`
+  from Stage 12; both close paths route through `requireValid(...)` so earlier-state closes
+  remain refused.
+- **No new error code** — `COMPLAINT_NOT_ASSIGNED_TO_TECHNICIAN` (403) and
+  `SLA_BREACH_REASON_REQUIRED` (400) both already existed from Stage 14.
+- **No Flyway migration** — pure code change, schema unchanged.
+
+**Docs**
+
+- `TECHNICAL_DESIGN.md` §5.4 (staff close row) tightened: the previous wording allowed close
+  from `IN_PROGRESS`/`RESOLVED` and even from `SUBMITTED`/`ASSIGNED` when breached, which
+  contradicts the state machine in code (`ComplaintStatusTransition` permits only
+  `RESOLVED → CLOSED`). Rewritten to match the code and to explicitly call out the
+  engineer/admin path as the on-behalf path per BRD §4.8.
+- **BRD — no changes needed.** §4.2 (Technician row) and §4.8 (Resolution & Closure) already
+  state the agreed policy verbatim, confirmed in the Stage 20.4 audit. Re-verified.
+- **`STAGE_21_DEVICE_TOKEN_CONTRACT.md` — no changes**, unrelated to this stage.
+
+#### Why a refactor instead of a parallel service
+
+Two close paths, one set of post-conditions (status / closed_at / breach flag / history row /
+domain event). Duplicating that into a `ComplaintTechnicianClosureService` would have meant
+two near-identical methods to keep in sync. The extracted private `doClose(...)` is 22 lines;
+the two public methods are 8 lines each and differ only in their scope check. Matches the
+"add the abstraction the second time you need it" rule — this is exactly that second time.
+
+#### Why the technician close returns `Void` (not `ComplaintStaffDetailResponse`)
+
+The staff close (Stage 16.1) returns the post-close detail so the FE can update its cache in
+one round-trip. The technician version returns `Void` because:
+
+- `ComplaintStaffReadService.getById(...)` (the only single-complaint read for staff) gates on
+  `ComplaintScopeGuard`, which throws `FORBIDDEN` for `TECHNICIAN`. Reusing it would either
+  require a new "read-mine" path or a guard relaxation — both are scope creep for this fix.
+- The technician already has `GET /api/v1/technician/complaints` for list refresh after close.
+  A single-detail read for technicians can land as a small follow-up if the FE asks (flagged
+  below).
+
+#### Incidents fixed during implementation
+
+_None of note._ The IDE inspector flagged "Could not autowire `ComplaintRepository`" and
+"never used `closeByTechnician`" on the refactored service — both are IntelliJ static-analysis
+limitations (Spring Data proxies + the controller wiring resolved at runtime) and not real
+compile errors. Tests + Maven build green first try.
+
+#### Tests added (4 new — total 152 unit + 8 IT)
+
+- `ComplaintClosureServiceTest`:
+  - **`closeByTechnician_happyPath`** — assigned technician closes own `RESOLVED` complaint
+    on-time → `CLOSED`, `closed_at` set, `sla_breached=false`, history saved,
+    `ComplaintClosedEvent` published.
+  - **`closeByTechnician_foreignTechnician_rejected`** — different `assignedTechnicianId` →
+    `COMPLAINT_NOT_ASSIGNED_TO_TECHNICIAN`; state unchanged, no history, no event (defence-in-depth
+    against a future bug short-circuiting the guard).
+  - **`closeByTechnician_breachedNoReason_rejected`** — breached complaint, blank
+    `slaBreachReason` in body, none on file → `SLA_BREACH_REASON_REQUIRED`; no history written.
+- `TechnicianComplaintControllerTest`:
+  - **`close_success`** — `POST /api/v1/technician/complaints/7/close` with body delegates to
+    `closure.closeByTechnician(...)`, returns 200 envelope.
+
+Existing closure tests for engineer / admin still pass (the shared `doClose(...)` private
+preserves all prior behaviour).
+
+#### Build status
+
+- `./mvnw verify` green.
+- **152 unit + 8 IT** (was 148 + 8).
+- OpenAPI: **52 paths** (was 51) — new `POST /api/v1/technician/complaints/{id}/close`.
+- Smoke harness unchanged — `scripts/smoke.sh` still routes close via the engineer (which still
+  works); a follow-up could add a technician-close variant smoke if useful.
+
+#### Carry-overs / known follow-ups
+
+- **`TECHNICAL_DESIGN.md` lines 365–366 doc drift** (spotted while tightening line 355 above):
+  the technician resolution-image endpoint is documented as
+  `POST /technician/complaints/{id}/resolution-images`, but the code uses `/images` (Stage 14).
+  And a `DELETE /resolution-images/{imageId}` is documented but never shipped. Cosmetic
+  drift only — neither affects callers because the FE already uses the OpenAPI snapshot, not
+  this table. Fix next time we touch §5.5.
+- **Smoke variant for technician close** — `scripts/smoke.sh` currently demonstrates the
+  engineer close-on-behalf path. A second smoke (or a flag in the existing one) could exercise
+  the technician close path now that it exists. Cheap; defer until the next smoke iteration.
+- **Stage 21 (device tokens) still blocked on FE sign-off** — unchanged from Stage 20.4.
+- **Future technician single-detail read** — if the FE wants the same one-round-trip behaviour
+  on close that staff get, add `GET /api/v1/technician/complaints/{id}` (assigned-technician
+  scope) and switch the close endpoint to return the detail. Defer until FE asks.
 
 
 ## How to update this log

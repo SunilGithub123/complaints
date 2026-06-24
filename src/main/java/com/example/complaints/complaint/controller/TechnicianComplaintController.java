@@ -3,10 +3,12 @@ package com.example.complaints.complaint.controller;
 import com.example.complaints.auth.security.AuthenticatedStaff;
 import com.example.complaints.common.dto.ApiResponse;
 import com.example.complaints.common.dto.PageResponse;
+import com.example.complaints.complaint.dto.CloseComplaintRequest;
 import com.example.complaints.complaint.dto.ComplaintImageResponse;
 import com.example.complaints.complaint.dto.ComplaintListItemResponse;
 import com.example.complaints.complaint.dto.ComplaintSearchRequest;
 import com.example.complaints.complaint.dto.ResolveComplaintRequest;
+import com.example.complaints.complaint.service.ComplaintClosureService;
 import com.example.complaints.complaint.service.ComplaintResolutionService;
 import com.example.complaints.complaint.service.ComplaintSearchService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -38,10 +40,11 @@ import java.util.List;
 @RequestMapping("/api/v1/technician/complaints")
 @RequiredArgsConstructor
 @Tag(name = "Technician Complaints",
-        description = "Technician lifecycle actions: start, resolve, add resolution images")
+        description = "Technician lifecycle actions: start, resolve, add resolution images, close")
 public class TechnicianComplaintController {
 
     private final ComplaintResolutionService resolution;
+    private final ComplaintClosureService closure;
     private final ComplaintSearchService search;
 
     @GetMapping
@@ -85,6 +88,21 @@ public class TechnicianComplaintController {
             @RequestPart("images") List<MultipartFile> images
     ) {
         return ResponseEntity.ok(ApiResponse.ok(resolution.addResolutionImages(caller, id, images)));
+    }
+
+    @PostMapping("/{id}/close")
+    @Operation(summary = "Close a RESOLVED complaint that is assigned to the calling technician",
+            description = "BRD §4.8: technician is the normal closing actor. Caller must be the "
+                    + "assigned technician; complaint must be RESOLVED. Body's slaBreachReason is "
+                    + "required only when the complaint is SLA-breached and no reason was already "
+                    + "captured at resolve time.")
+    public ResponseEntity<ApiResponse<Void>> close(
+            @AuthenticationPrincipal AuthenticatedStaff caller,
+            @PathVariable Long id,
+            @Valid @RequestBody CloseComplaintRequest req
+    ) {
+        closure.closeByTechnician(caller, id, req);
+        return ResponseEntity.ok(ApiResponse.ok(null));
     }
 }
 

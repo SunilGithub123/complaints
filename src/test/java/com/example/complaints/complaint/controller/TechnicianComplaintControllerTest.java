@@ -5,10 +5,12 @@ import com.example.complaints.auth.security.AuthenticatedStaff;
 import com.example.complaints.auth.security.JwtFactory;
 import com.example.complaints.common.dto.PageResponse;
 import com.example.complaints.common.exception.GlobalExceptionHandler;
+import com.example.complaints.complaint.dto.CloseComplaintRequest;
 import com.example.complaints.complaint.dto.ComplaintListItemResponse;
 import com.example.complaints.complaint.dto.ResolveComplaintRequest;
 import com.example.complaints.complaint.model.ComplaintSeverity;
 import com.example.complaints.complaint.model.ComplaintStatus;
+import com.example.complaints.complaint.service.ComplaintClosureService;
 import com.example.complaints.complaint.service.ComplaintResolutionService;
 import com.example.complaints.complaint.service.ComplaintSearchService;
 import org.junit.jupiter.api.DisplayName;
@@ -43,6 +45,7 @@ class TechnicianComplaintControllerTest {
     @Autowired ObjectMapper objectMapper;
 
     @MockitoBean ComplaintResolutionService resolution;
+    @MockitoBean ComplaintClosureService closure;
     @MockitoBean ComplaintSearchService search;
     @MockitoBean JwtFactory jwtFactory;
 
@@ -87,6 +90,20 @@ class TechnicianComplaintControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.content.length()").value(1))
                 .andExpect(jsonPath("$.data.content[0].status").value("IN_PROGRESS"));
+    }
+
+    @Test
+    @DisplayName("POST close: technician closes own RESOLVED complaint → 200 + delegates to closure service")
+    void close_success() throws Exception {
+        doNothing().when(closure).closeByTechnician(any(), eq(7L), any());
+
+        mockMvc.perform(post("/api/v1/technician/complaints/7/close").with(technician())
+                        .contentType(APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new CloseComplaintRequest(null))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true));
+
+        verify(closure).closeByTechnician(any(), eq(7L), any());
     }
 }
 

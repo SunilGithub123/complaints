@@ -40,6 +40,9 @@ class ComplaintClosureServiceTest {
     private final AuthenticatedStaff engineer = new AuthenticatedStaff(
             1L, "ENG001", UserRole.ENGINEER, 100L, 10L, false);
 
+    private final AuthenticatedStaff technician = new AuthenticatedStaff(
+            42L, "TECH042", UserRole.TECHNICIAN, 100L, 10L, false);
+
     @BeforeEach
     void setUp() {
         complaints = mock(ComplaintRepository.class);
@@ -113,7 +116,56 @@ class ComplaintClosureServiceTest {
                 .contactMobile("+919999999999").categoryId(3L).description("x")
                 .distributionCenterId(10L).status(ComplaintStatus.RESOLVED).slaBreached(false)
                 .resolvedAt(Instant.now())
+                .assignedTechnicianId(42L)
                 .build();
+    }
+
+    // ----- closeByTechnician (BRD §4.8: technician is the normal closing actor) -----
+
+    @Test
+    @DisplayName("closeByTechnician: assigned technician closes own RESOLVED → CLOSED on-time")
+    void closeByTechnician_happyPath() {
+        Complaint c = baseResolved();
+        c.setSlaDeadline(Instant.now().plus(1, ChronoUnit.HOURS));
+        when(complaints.findById(7L)).thenReturn(Optional.of(c));
+
+        service.closeByTechnician(technician, 7L, new CloseComplaintRequest(null));
+
+        assertThat(c.getStatus()).isEqualTo(ComplaintStatus.CLOSED);
+        assertThat(c.getClosedAt()).isNotNull();
+        assertThat(c.isSlaBreached()).isFalse();
+        verify(history).save(any());
+        verify(events).publishEvent(any(ComplaintClosedEvent.class));
+    }
+
+    @Test
+    @DisplayName("closeByTechnician: foreign technician → COMPLAINT_NOT_ASSIGNED_TO_TECHNICIAN")
+    void closeByTechnician_foreignTechnician_rejected() {
+        Complaint c = baseResolved();
+        c.setAssignedTechnicianId(999L); // not the caller (42)
+        c.setSlaDeadline(Instant.now().plus(1, ChronoUnit.HOURS));
+        when(complaints.findById(7L)).thenReturn(Optional.of(c));
+
+        assertThatThrownBy(() -> service.closeByTechnician(technician, 7L, new CloseComplaintRequest(null)))
+                .isInstanceOf(BusinessException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.COMPLAINT_NOT_ASSIGNED_TO_TECHNICIAN);
+        assertThat(c.getStatus()).isEqualTo(ComplaintStatus.RESOLVED);
+        verify(history, never()).save(any());
+        verify(events, never()).publishEvent(any());
+    }
+
+    @Test
+    @DisplayName("closeByTechnician: breached + no reason in body and none on file → SLA_BREACH_REASON_REQUIRED")
+    void closeByTechnician_breachedNoReason_rejected() {
+        Complaint c = baseResolved();
+        c.setSlaDeadline(Instant.now().minus(2, ChronoUnit.HOURS));
+        c.setSlaBreached(true);
+        when(complaints.findById(7L)).thenReturn(Optional.of(c));
+
+        assertThatThrownBy(() -> service.closeByTechnician(technician, 7L, new CloseComplaintRequest("")))
+                .isInstanceOf(BusinessException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.SLA_BREACH_REASON_REQUIRED);
+        verify(history, never()).save(any());
     }
 }
 

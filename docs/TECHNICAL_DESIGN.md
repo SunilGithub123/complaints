@@ -352,7 +352,7 @@ Why advisory lock over `SELECT … FOR UPDATE`:
 | POST | `/staff/complaints/{id}/severity` | ENGINEER, ADMIN | Update severity later (if needed). Body: `severity` |
 | POST | `/staff/complaints/{id}/reject` | ENGINEER, ADMIN | Reject with reason. Body: `reason` (required) |
 | POST | `/staff/complaints/{id}/mark-duplicate` | ENGINEER, ADMIN | Body: `parentTicketNo, reason?` |
-| POST | `/staff/complaints/{id}/close` | ENGINEER, ADMIN | Close the complaint on behalf of the technician (e.g., technician unavailable, or breach happened before assignment). Allowed from `IN_PROGRESS` or `RESOLVED`; also from `SUBMITTED`/`ASSIGNED` *only* when `sla_breached = true` and the engineer/admin explicitly closes-with-reason. Body: `resolutionNotes (required if not already set), slaBreachReason (required if breached and not already given)`. |
+| POST | `/staff/complaints/{id}/close` | ENGINEER, ADMIN | Close-on-behalf path (BRD §4.8). The technician is the *normal* closer; engineer / admin close on-behalf when the technician is unavailable. **State machine: `RESOLVED → CLOSED` only** (v1; the validator refuses earlier-state closes). Body: `slaBreachReason` (required when `sla_breached = true` and a reason was not already captured at resolve time). |
 
 ### 5.5 Technician APIs
 
