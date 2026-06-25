@@ -29,6 +29,8 @@ public class CaffeineCacheConfig {
         mgr.setCaffeine(Caffeine.newBuilder()
                 .maximumSize(10_000)
                 .expireAfterWrite(Duration.ofMinutes(10))
+                // recordStats() is load-bearing for the Stage 21.2.5 Micrometer cache metrics
+                // — without it cache_gets_total / cache_hits_total / cache_size are all zero.
                 .recordStats());
         return mgr;
     }

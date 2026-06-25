@@ -3575,6 +3575,117 @@ docs/openapi.json — 56 paths, unchanged.
   exactly where the normaliser lives. If after a year nobody has needed it, delete.
 
 
+### Stage 21.2.5 — Phase 7 ops chores batch (git SHA in /actuator/info + JSON logs + Caffeine metrics) — ✅ 2026-06-25
+
+> Three small ops-readiness items shipped as one stage because they share a theme
+> ("observability primitives we should have had since Phase 0") and none of them
+> warranted its own log entry. All three were tracked as Phase 7 carry-overs.
+
+#### What shipped
+
+**1. `/actuator/info` now serves git + build identity**
+
+- Added `git-commit-id-maven-plugin` (`io.github.git-commit-id` v9.0.1) bound to
+  the `initialize` phase, writing `target/classes/git.properties`. Configured
+  tolerant (`failOnNoGitDirectory=false`) so tarball / CI-cache builds without
+  a `.git` directory don't break.
+- Added `build-info` execution to `spring-boot-maven-plugin`, writing
+  `target/classes/META-INF/build-info.properties`.
+- `application.yml` `management.info.build.enabled=true` and `management.info.git.enabled=true` with `mode: full` — Boot 4.1 disables these by default, opt-in needed.
+- Verified live: `GET /actuator/info` returns:
+  ```jsonc
+  {
+    "git":   { "commit": { "id": { "full": "7121858…", "abbrev": "7121858" },
+                           "user": { "name": "Sunil Gulhane" },
+                           "time": "2026-06-25T04:54:53Z" },
+               "branch": "main" },
+    "build": { "artifact": "complaints", "name": "complaints",
+               "time": "2026-06-25T05:00:16Z", "version": "0.0.1-SNAPSHOT",
+               "group": "com.example" }
+  }
+  ```
+- Only the 5 git fields we care about are emitted (`includeOnlyProperties` filter)
+  — full git metadata is noisy (remote URL, dirty flag, tags, build host) and would
+  bloat the `info` payload without value.
+
+**2. JSON log layout for prod (Spring Boot 4.1 native structured logging)**
+
+- `application-prod.yml` `logging.structured.format.console: ecs`. ECS = Elastic
+  Common Schema, line-delimited JSON to stdout. Kibana / Filebeat / OpenSearch /
+  Datadog / GCP Cloud Logging all accept it as-is.
+- Dev profile keeps the human-readable Logback default — same logs you've been
+  reading for 21 stages, no change to local DX.
+- Rotating file appender (when configured at the JVM level) stays human-readable
+  for ssh-into-the-box debugging. Stdout-only structured was a deliberate choice.
+
+**3. Caffeine cache metrics → Micrometer / Prometheus**
+
+- Added `io.micrometer:micrometer-registry-prometheus` to the runtime classpath.
+  We've been exposing `/actuator/prometheus` since Phase 0 but the underlying
+  registry was missing — the endpoint silently returned 404 / empty. **Now live.**
+- `CaffeineCacheConfig.recordStats()` was already called; added a comment flagging
+  it as load-bearing for the binding so a future "let me just drop this unused call"
+  PR doesn't silently zero the metrics.
+- Boot's `CacheMetricsAutoConfiguration` does the binding — zero code on our side.
+- Verified live against `GET /actuator/prometheus`:
+  ```
+  cache_gets_total{cache="categories",result="hit"}             0.0
+  cache_gets_total{cache="categories",result="miss"}            0.0
+  cache_gets_total{cache="subdivisions",result="hit"}           0.0
+  cache_gets_total{cache="subdivisions",result="miss"}          0.0
+  cache_gets_total{cache="distributionCenters",result="hit"}    0.0
+  cache_gets_total{cache="distributionCenters",result="miss"}   0.0
+  cache_puts_total{cache="…"}              cache_evictions_total{cache="…"}
+  cache_size{cache="…"}                    cache_eviction_weight_total{cache="…"}
+  ```
+- One meter per cache × stat. Once a Grafana dashboard binds against this we'll see
+  hit-rate / eviction-rate per cache out of the box.
+
+#### Tests added
+
+- **`CacheMetricsIT`** — 1 IT that boots the context and asserts
+  `cache.gets` meters exist for every configured cache name. Guards the chain
+  *(CaffeineCacheManager bean → `setCacheNames(...)` → `recordStats()` →
+  `CacheMetricsAutoConfiguration` → `MeterRegistry` binding)*. If any link breaks
+  in a future refactor, this fails loudly instead of silently returning empty
+  Prometheus output in prod.
+- No test for `/actuator/info` — it's declarative config; verifying it would
+  re-test Spring Boot's `GitInfoContributor` / `BuildInfoContributor`, which is
+  framework code. Manual smoke (`curl /actuator/info`) is the right level.
+- No test for the ECS log layout — only active under prod profile, depends on
+  Logback init order, and Spring Boot ships its own tests for the encoder. A
+  brittle "assert log line is valid JSON" test would protect nothing.
+
+#### Why bundle three changes in one stage
+
+Each is ~30 min of work. Splitting them as 21.2.5 / 21.2.6 / 21.2.7 would triple
+the ceremony for no signal. They share one commit per the SRP-for-commits rule
+("one commit = one change you might want to revert as a unit") because reverting
+"ops observability v1" as a single block makes sense; reverting just the git
+plugin alone never would.
+
+#### Build status
+
+```
+[INFO] Tests run: 177, Failures: 0, Errors: 0, Skipped: 0  (Surefire — unit; unchanged)
+[INFO] Tests run:   9, Failures: 0, Errors: 0, Skipped: 0  (Failsafe — IT;   +1 cache metrics)
+[INFO] BUILD SUCCESS
+docs/openapi.json — unchanged (no controller / DTO change).
+```
+
+#### Carry-overs / known follow-ups
+
+- **Phase 7 chores list** — git SHA ✅, JSON logs ✅, cache metrics ✅. Remaining Phase
+  7 items beyond these three live in `ROADMAP.md` — none blocking.
+- **JVM / HTTP / DB pool metrics** are auto-bound by Boot but **dashboards** aren't
+  defined yet. That's an ops repo concern, not BE code.
+- **Stage 21.3 BE** still gated on GCP service-account JSON.
+- The `prometheus` endpoint was exposed but non-functional from Phase 0 through
+  Stage 21.2.4 — anyone reading dashboards for the past 21 stages was reading air.
+  Flagged here so it lands in the post-mortem of any "where did our prod cache
+  numbers come from?" question. (Answer: nowhere. They start counting today.)
+
+
 ## How to update this log
 
 1. At the end of a stage, append (or fill in) the corresponding subsection.

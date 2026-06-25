@@ -37,4 +37,11 @@ logging:
   level:
     root: WARN
     com.example.complaints: INFO
+  # Stage 21.2.5 — JSON log layout for prod (Spring Boot 4.1 native structured logging).
+  # ECS is the Elastic Common Schema — Kibana / Filebeat / OpenSearch out of the box,
+  # plus most log shippers (Datadog, GCP Logging) accept it as-is. Stdout only;
+  # rotating file appender stays human-readable for ssh-into-the-box debugging.
+  structured:
+    format:
+      console: ecs
 
