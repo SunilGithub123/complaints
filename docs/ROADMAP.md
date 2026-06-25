@@ -265,9 +265,9 @@
   - `BFF` web endpoint (`/auth/login/web` + `/auth/refresh/web`) that sets refresh token as httpOnly cookie (D8)
   - Optimistic-lock `version` column on `complaint` (D9)
 - **Performance:**
-  - Cache hit/miss metrics exposed (`/actuator/prometheus`)
+  - Cache hit/miss metrics exposed (`/actuator/prometheus`) — ✅ Stage 21.2.5
   - HikariCP tuning per the prod load expectations (20/pod)
-  - DB indexes verified by `EXPLAIN` on the hot queries
+  - DB indexes verified by `EXPLAIN` on the hot queries — ✅ Stage 21.2.8 (`docs/DB_INDEX_AUDIT.md`, V1.6 adds `ix_complaint_category_status` + partial `ix_device_token_active_updated`)
 - **Operational:**
   - Bucket4j rate-limit metrics
   - Structured logs (JSON) in prod

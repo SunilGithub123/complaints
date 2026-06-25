@@ -3899,6 +3899,122 @@ docs/openapi.json — unchanged (no controller / DTO change; security wiring onl
   the first real rotation, when we'll know whether we want it.
 
 
+### Stage 21.2.8 — DB index EXPLAIN audit + V1.6 perf indexes
+
+**Date:** 2026-06-25
+**Status:** Shipped (perf hardening; backward compatible).
+**Evidence doc:** `docs/DB_INDEX_AUDIT.md` (full table of before / after plans).
+
+#### Why
+
+After 21 stages of additive schema work I had no idea which of the original
+V1.0 indexes were actually doing their job at non-toy data volumes. Dev DB
+sits at ~30 rows total — meaningless EXPLAIN. The roadmap entry "DB indexes
+EXPLAIN audit (half-day, perf)" was the prompt; the goal was evidence-based
+index changes, not speculative ones.
+
+#### Method
+
+Spun up a sibling `complaints_audit` database, applied V1.0–V1.5 schema only
+(skipping the dev-only seed migrations), and seeded realistic volumes:
+50 000 complaints, 150 000 history rows, 20 000 device tokens, 50 000
+consumers, 2 000 staff. `ANALYZE` ran before any EXPLAIN. Ran every "hot"
+query the repositories actually issue (12 in total) with
+`EXPLAIN (ANALYZE, BUFFERS)`, captured plans, looked for Seq Scans on
+columns the WHERE clause filtered.
+
+#### What shipped — `V1.6__perf_indexes_audit.sql`
+
+Two indexes. Both directly caused by Seq Scans in the EXPLAIN evidence:
+
+1. **`ix_complaint_category_status (category_id, status)`** —
+   `existsByCategoryIdAndStatusIn` (category-deactivate guard + the
+   category-filtered branch of complaint search) was doing a Seq Scan cost
+   2285 with no candidate index on `category_id`. The seeded category=2 case
+   hides this because LIMIT 1 finds a match in O(1) at 25% match rate — but
+   the **realistic** deactivate-guard runs against a category an admin
+   intends to retire, where match rate is near zero and the seq scan reads
+   the entire 50k-row table. Verified by re-running with `category_id=999`:
+   plan flips to `Index Only Scan` cost 4.31, Heap Fetches 0.
+
+2. **`ix_device_token_active_updated (updated_at) WHERE active = true`** —
+   `DeviceTokenRepository.markInactiveOlderThan(cutoff)` (Stage 21.2.2
+   nightly sweep). Before: Seq Scan over 20k rows, ~2.6 ms. After: Bitmap
+   Index Scan on the partial; cost drops 671 → 627 and the index footprint
+   is only the active subset. The win compounds with scale — at 200k tokens
+   the sweep would otherwise creep into 25 ms+ per nightly run. Partial
+   predicate matches the sweep's `WHERE active = true` exactly so the planner
+   gets a free index-only filter.
+
+Migration uses regular `CREATE INDEX`, not `CONCURRENTLY`, because Flyway
+wraps each migration in a transaction and CONCURRENTLY can't run inside one.
+Both target tables are small enough that the brief lock at deploy time is
+acceptable for the v1 single-instance topology. Documented in the migration
+file with the upgrade path for when we go multi-node.
+
+#### What didn't ship — 5 candidates rejected with reasons
+
+Documented in `docs/DB_INDEX_AUDIT.md` so a future contributor with concrete
+pain can revisit them. Headlines:
+
+- `complaint (consumer_master_id, created_at DESC)` composite — sort runs on
+  1–10 rows per consumer, not worth the write amplification.
+- `complaint_history (complaint_id, changed_at)` composite — 3 rows per
+  complaint avg, sort is free.
+- `complaint (distribution_center_id, status, created_at DESC)` 3-col for
+  admin search — current Index Scan Backward + filter is acceptable until
+  DC count and complaint volume both grow.
+- `user_account (subdivision_id, role, dc_id, enabled)` composite — staff
+  count per subdivision caps in low thousands; Seq Scan cost 68 is fine.
+- `otp (mobile, created_at DESC)` — cleaned hourly by the existing cron,
+  cardinality stays low.
+
+Each of these would be a real win at 10x scale. Today they'd be premature.
+
+#### What bit us
+
+- Couldn't write the seed file via `create_file` to `/tmp/` — landed as a
+  0-byte file (tool path quirk). Worked around by writing a small Python
+  helper that emits the SQL to disk. Heredoc straight to shell got mangled
+  by a stale heredoc carry-over from a prior session. Logged for future
+  ops audit work: **write seed/test scripts via Python file or a real path
+  inside the workspace**, never via tool-direct write to `/tmp`.
+- Postgres rejected `(random()*48 - 24) || ' hours'` cast to interval when
+  random produced scientific-notation floats like `4.6e-05`. Fixed with
+  `trunc(...)::int` wrappers. Worth recording — this idiom shows up in
+  every "generate test volume" script ever written for postgres.
+
+#### Build status
+
+```
+[INFO] Tests run: 184, Failures: 0, Errors: 0, Skipped: 0  (Surefire — unit; unchanged)
+[INFO] Tests run:   9, Failures: 0, Errors: 0, Skipped: 0  (Failsafe — IT;   V1.6 applied to Testcontainers fresh DBs cleanly)
+[INFO] BUILD SUCCESS
+docs/openapi.json — unchanged (schema-only change).
+```
+
+Every IT spins up a fresh Postgres container and runs Flyway start-to-end.
+V1.6 sliding in without any IT change is the strongest proof it doesn't
+collide with anything already shipped.
+
+#### Carry-overs / known follow-ups
+
+- **`docs/DB_INDEX_AUDIT.md`** is the living artifact. Next time someone
+  asks "why doesn't query X have an index", the answer is "re-run the audit
+  with 10x the volume and see if EXPLAIN picks a seq scan now". The doc
+  has the reproduce-the-experiment commands.
+- **No `pg_stat_statements` enabled yet**. When prod has been running for
+  a month and we want to identify the actual slowest queries by p99
+  wall-time (rather than reasoning from access patterns), that's the next
+  lever. Cheap to enable; defer until there's a query we don't already
+  know about.
+- **Composite index on `(distribution_center_id, status, created_at)`** —
+  noted as deferred above. When complaint volume crosses ~500k or when
+  the admin search list page goes slow on staging, revisit. The cost
+  comparison is in `DB_INDEX_AUDIT.md` so future-us doesn't have to redo
+  the analysis from scratch.
+
+
 ## How to update this log
 
 1. At the end of a stage, append (or fill in) the corresponding subsection.
