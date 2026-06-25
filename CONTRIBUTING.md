@@ -77,7 +77,7 @@ The full list is in [`.github/copilot-instructions.md`](./.github/copilot-instru
 | You change… | You also must… |
 |-------------|---------------|
 | The DB schema | Add a new Flyway file `V<x.y+1>__<snake_case>.sql`; update [`docs/schema.sql`](docs/schema.sql) for reference. |
-| An API endpoint | Update springdoc annotations; reflect the change in [`docs/TECHNICAL_DESIGN.md §5`](docs/TECHNICAL_DESIGN.md). |
+| An API endpoint | Update springdoc annotations; regenerate the OpenAPI snapshot with `./mvnw verify -Dopenapi.update=true` and commit the resulting `docs/openapi.json` alongside the controller change (CI fails on drift); reflect the change in [`docs/TECHNICAL_DESIGN.md §5`](docs/TECHNICAL_DESIGN.md). |
 | A role / permission | Update `SecurityConfig`, `@PreAuthorize`, ArchUnit scope tests, and [`docs/BRD.md §3`](docs/BRD.md) if business-visible. |
 | A configuration knob | Add to the relevant `application-<profile>.yml`; document in [`docs/TECHNICAL_DESIGN.md §9`](docs/TECHNICAL_DESIGN.md). |
 | A business rule | Update [`docs/BRD.md`](docs/BRD.md) first, then implement. |

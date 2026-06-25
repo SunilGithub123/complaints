@@ -3474,6 +3474,107 @@ docs/openapi.json — 56 paths unchanged.
   WEB rows, so no additive migration is needed at the schema layer.
 
 
+### Stage 21.2.4 — Spec-drift CI guard — ✅ 2026-06-25
+
+> Closes the **Stage 3 / 6 / 7 / 21.2.1 carry-over** *"spec-drift CI guard"*. Now
+> that operationIds are stable (Stage 21.2.1), every change to a controller / DTO /
+> `@Operation` that hits the wire either lands with a regenerated `docs/openapi.json`
+> in the same PR — or CI fails. No more silent drift between the BE shape and the
+> snapshot the FE codegen reads.
+
+#### What shipped
+
+- **`OpenApiExportIT` reshaped** from "always overwrite" to **verify-by-default /
+  opt-in-update**:
+  - **Verify mode (default + CI):** fetches `/v3/api-docs` from a Spring Boot test
+    server, compares string-equal against the committed `docs/openapi.json`. On
+    mismatch, fails with the **byte offset, both sides of the divergence in a
+    ±60-char window, and the exact regenerate command** to fix it.
+  - **Update mode (`-Dopenapi.update=true`):** old behaviour — overwrites
+    `docs/openapi.json`. Use locally whenever you intentionally changed a
+    controller / DTO / `@Operation`.
+- **`CONTRIBUTING.md` "When you change…" table updated.** The "API endpoint" row
+  now says explicitly: regenerate the snapshot with
+  `./mvnw verify -Dopenapi.update=true`, commit the resulting `docs/openapi.json`
+  alongside the controller change, CI fails on drift.
+
+#### Why string-equal (no JSON canonicalisation)
+
+I originally wrote a Jackson-3 canonicaliser (sorted keys + indented). It didn't
+work the way I expected — `ORDER_MAP_ENTRIES_BY_KEYS` doesn't apply when you
+deserialise to `Object.class` (Jackson gives you a `LinkedHashMap`, insertion-order
+preserved). I could have switched to a recursive `TreeMap` rebuild, but stepped
+back and looked at the evidence: springdoc has emitted byte-identical output
+across all 21 stages of this project for the same controllers. Adding a
+non-trivial normaliser to defend against a problem we have zero examples of is
+speculative work. The simpler comparison is good enough today. If springdoc ever
+goes non-deterministic (e.g. unrelated dependency upgrade), we add the normaliser
+then with a concrete failure to anchor against — not before.
+
+#### Why opt-in update mode (and not e.g. a `-Pupdate-spec` Maven profile)
+
+A system property is the lowest-ceremony option. `-Dopenapi.update=true` runs the
+same `OpenApiExportIT` you already know — no new lifecycle, no profile activation,
+no per-environment override. CI never sets it; local devs set it deliberately when
+they change endpoints. One mental model, two behaviours.
+
+#### How it caught itself
+
+Verified by tampering: changed `"closeComplaint"` → `"closeComplaintTAMPERED"` in
+`docs/openapi.json`, ran `./mvnw failsafe:integration-test -Dit.test=OpenApiExportIT`,
+got:
+
+```
+java.lang.AssertionError:
+OpenAPI snapshot drift detected — committed docs/openapi.json does not match the live spec.
+
+First divergence:
+  at offset 10311 (expected length 61172, live length 61164)
+    committed ...without a follow-up GET.","operationId":"closeComplaintTAMPERED","parameters":[...
+    live      ...without a follow-up GET.","operationId":"closeComplaint","parameters":[{"name":...
+
+Regenerate with:
+  ./mvnw verify -Dopenapi.update=true
+then commit docs/openapi.json alongside your controller change.
+```
+
+Exactly the signal we want: name of the operation that diverged, both sides, one
+copy-paste fix.
+
+#### What bit us during the change
+
+`./mvnw -q failsafe:integration-test -Dit.test=...` does **not** trigger a Java
+recompile. The first three "verify mode" runs reported pass — because the
+compiled `.class` was still the old write-only version. The drift test only worked
+correctly after an explicit `./mvnw test-compile` to refresh the class. **Lesson
+for future contributors:** when iterating on test code, use `./mvnw verify` or
+prefix with `test-compile`. Logged here so the next person doesn't burn 20 minutes
+on the same trap.
+
+#### Tests added
+
+_None._ The IT *is* the guard — it has one test, `exportOrVerifyOpenApiSnapshot()`,
+that's now load-bearing on every CI run. No second test would add signal.
+
+#### Build status
+
+```
+[INFO] Tests run: 177, Failures: 0, Errors: 0, Skipped: 0  (Surefire — unit; unchanged)
+[INFO] Tests run:   8, Failures: 0, Errors: 0, Skipped: 0  (Failsafe — IT;   unchanged)
+[INFO] BUILD SUCCESS
+docs/openapi.json — 56 paths, unchanged.
+```
+
+#### Carry-overs / known follow-ups
+
+- **Stage 3 / 6 / 7 / 21.2.1 carry-over "spec-drift CI guard"**: ✅ closed.
+- **Stage 21.3 BE — real `FcmPushService`** still gated on GCP service-account JSON
+  for staging. Unchanged.
+- **`unusedHintForFutureCanonicaliser()` stub** in the IT is intentional — a one-line
+  doc hook so the next contributor who hits a non-deterministic springdoc emit knows
+  exactly where the normaliser lives. If after a year nobody has needed it, delete.
+
+
 ## How to update this log
 
 1. At the end of a stage, append (or fill in) the corresponding subsection.
