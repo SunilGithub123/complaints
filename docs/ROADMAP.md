@@ -354,7 +354,7 @@
 | Concern | How it shows up |
 |---------|-----------------|
 | **Tests** | Minimum-test policy from TD §14.2 applied per slice — 1 happy + 1 unhappy per service/controller. *Not* deferred to a "test phase". |
-| **ArchUnit rules** | Tighten the rules as each module lands. Flip `failOnEmptyShould=true` after Phase 1. |
+| **ArchUnit rules** | Tighten the rules as each module lands. `archRule.failOnEmptyShould=true` since Phase 1 Stage 2. Shape rules (records / mappers / repositories / no field injection) added in Stage 21.2.6. |
 | **Docs** | Update `TECHNICAL_DESIGN.md` / `BRD.md` *in the same PR* as the code change. CONTRIBUTING.md "when you change X you must Y" enforces this. |
 | **OpenAPI** | Springdoc annotations on every new controller. FE regenerates `@complaints/api` automatically. |
 | **Secrets** | Always env-var or Secret Manager — never committed. gitleaks blocks accidents. |

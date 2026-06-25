@@ -3686,6 +3686,106 @@ docs/openapi.json — unchanged (no controller / DTO change).
   numbers come from?" question. (Answer: nowhere. They start counting today.)
 
 
+### Stage 21.2.6 — ArchUnit shape rules audit + four new rules — ✅ 2026-06-25
+
+> Roadmap cross-cutting-concerns table said *"Flip `failOnEmptyShould=true` after
+> Phase 1"*. Audit showed it was **already** flipped in Phase 1 Stage 2 and the
+> roadmap entry was stale. Pivoted the task to *"audit which hard rules from
+> `.github/copilot-instructions.md` are still un-encoded and add the high-signal
+> ones, given that the strict-empty mode lets us add rules safely."*
+
+#### What shipped
+
+Four new ArchUnit rules in `PackageBoundaryTest` (plus one anchor for the
+`fields()` rule):
+
+| Rule | Hard-rule source | Current matches |
+|------|------------------|-----------------|
+| `dtos_must_be_records_or_enums` | "DTOs are Java 21 `record` types" | 20/20 DTOs are records, 0 violations |
+| `mappers_must_end_with_mapper_suffix` | Naming: `*Mapper` suffix when type fits role | 6/6 mappers comply |
+| `repositories_must_be_spring_data_interfaces` | Defensive: repo package = Spring Data only | 13/13 repos are `Repository` interfaces |
+| `no_field_injection_via_autowired` | "Constructor injection only — no `@Autowired` on fields" | 0 `@Autowired` fields anywhere |
+| `field_universe_is_non_empty` (anchor) | n/a | Proves `fields()` universe is non-empty so the rule above can't silently pass on an empty match-set |
+
+Total ArchUnit rules: **5 → 10**.
+
+#### Why the anchor rule
+
+`archRule.failOnEmptyShould=true` covers `classes()`-based rules — ArchUnit fails
+loudly if the matched class-set is empty. But the `fields()` API doesn't get the
+same automatic protection: if a future package rename moved everything out of
+`com.example.complaints..`, the `no_field_injection_via_autowired` rule would
+silently pass on an empty field-set. The anchor rule simply asserts the `fields()`
+universe is non-empty for our package, so any disappearance of all fields fails the
+build instead of going green for the wrong reason.
+
+#### Why not encode more rules
+
+I considered five more candidates and rejected them:
+
+1. **"No `Optional` as field / parameter / in collections"** — ArchUnit can express
+   this but the false-positive surface is wide (e.g. `Optional<T>` as a stream
+   intermediate). The 5 minutes saved by encoding is dwarfed by the inevitable
+   "why is my legit code red?" debugging. Code review covers it cleanly.
+2. **"No `catch (Exception)` outside `GlobalExceptionHandler`"** — ArchUnit's
+   exception-catching predicates are surprisingly weak; the rule would need a
+   per-method byte-code walk. Spotbugs would do this better.
+3. **"Service methods ≤ 30 lines / class ≤ 300 lines"** — checkstyle territory,
+   not architecture. ArchUnit can do it but the rule lives at the wrong layer.
+4. **"Cross-module data exchange via DTOs only, never entities"** — partially
+   covered by `controllers_must_not_serialize_entities`. The full rule (service
+   methods returning entities to other modules) is hard to express without
+   false-positives on same-module service-to-service calls.
+5. **"Entities use Lombok"** — Lombok annotations are class-retention but easy to
+   miss; better caught by review or a custom checkstyle rule.
+
+Each one is one PR away if we ever feel the pain. The four shipped today are the
+ones where the rule was strictly mechanical and currently 100% green.
+
+#### Tampering verification
+
+Added `TamperBean` with `@Autowired private String injected;`, ran the test,
+got the expected failure:
+
+```
+[ERROR] Tests run: 10, Failures: 1
+[ERROR] no_field_injection_via_autowired -- FAILURE!
+Field <com.example.complaints.common.TamperBean.injected> is annotated
+with @Autowired in (TamperBean.java:0)
+```
+
+Removed the file, suite returned to `Tests run: 10, Failures: 0`. Rule has bite.
+
+#### Bonus catch — ROADMAP stale
+
+The cross-cutting-concerns table in `ROADMAP.md` still said *"Flip
+`failOnEmptyShould=true` after Phase 1"*. Updated to reflect reality:
+already flipped since Phase 1 Stage 2, shape rules added in Stage 21.2.6.
+
+#### Tests added
+
+_None._ The four new `@ArchTest` fields **are** the tests. No second-order test
+would add signal — the tamper-verification I did manually is the only sensible
+proof these rules work, and it's not the kind of thing you commit (it requires
+adding a violating file you then delete).
+
+#### Build status
+
+```
+[INFO] Tests run: 182, Failures: 0, Errors: 0, Skipped: 0  (Surefire — unit; +5 ArchUnit rules)
+[INFO] Tests run:   9, Failures: 0, Errors: 0, Skipped: 0  (Failsafe — IT;   unchanged)
+[INFO] BUILD SUCCESS
+docs/openapi.json — unchanged (no controller / DTO change).
+```
+
+#### Carry-overs / known follow-ups
+
+- The five rule candidates I rejected above are documented for any future
+  contributor who wants to revisit them with concrete pain to anchor against.
+- ROADMAP cross-cutting-concerns table now accurate; same audit could be run on
+  other stale rows there (none jumped out today).
+
+
 ## How to update this log
 
 1. At the end of a stage, append (or fill in) the corresponding subsection.
