@@ -3786,6 +3786,119 @@ docs/openapi.json — unchanged (no controller / DTO change).
   other stale rows there (none jumped out today).
 
 
+### Stage 21.2.7 — JWT signing-key rotation via `kid` header
+
+**Date:** 2026-06-25
+**Status:** Shipped (security hardening; backward compatible).
+
+#### Why
+
+Ops had no way to rotate `JWT_SECRET` without killing every live session: the
+old factory verified with one hard-coded key, so any deploy that flipped the
+secret would 401 every staff browser and every consumer-verification token
+mid-flight. Wanted a stitch-in-time pattern: mint with a key id (`kid`) in
+the JWT header, verify by looking the key up by that `kid` — so during a
+rotation window the previous key stays live until the last token signed under
+it has expired.
+
+#### What shipped
+
+`JwtProperties` (record) gained two fields — `activeKid` and `keys`
+(`Map<String, String>` of `kid → secret`). Two accepted shapes:
+
+1. **Single secret (dev / unchanged):** set only `jwt.secret`. Auto-wrapped
+   into a one-entry map under `kid="v1"`. Every config file in the repo today
+   keeps working untouched.
+2. **Multi-key (prod rotation):** set `jwt.keys.<kid>=...` for each live key
+   and `jwt.active-kid` for the one used to sign new tokens. Old keys stay
+   listed until every token minted under them has expired.
+
+A compact constructor normalises both shapes into the multi-key form so the
+rest of the code only handles one case. A backward-compatible 5-arg
+constructor preserves the test wiring used by `StaffAuthServiceTest`,
+`OtpServiceTest`, `ConsumerVerificationFilterTest`. The canonical constructor
+is `@ConstructorBinding` so Spring still binds it (had to add this once the
+record went past one constructor — Spring otherwise tried a no-arg ctor and
+the context failed to load, caught in IT on first run).
+
+`JwtFactory` was reshaped:
+
+- Holds `Map<String, SecretKey> keysByKid` + a pinned `activeKey` / `activeKid`.
+- **Sign:** `Jwts.builder().header().keyId(activeKid).and()...signWith(activeKey, HS256)`.
+  Every issued token now carries the `kid` header.
+- **Verify:** swapped the static `verifyWith(signingKey)` for a `keyLocator`
+  that reads `header.getKeyId()` and looks the key up:
+  - Known `kid` → that key.
+  - Missing `kid` (only possible from pre-21.2.7 tokens minted during a
+    rolling deploy) → fall back to `activeKey`. Deliberate carve-out for the
+    rollout window; will naturally stop happening once those tokens expire.
+  - Unknown `kid` → reject with `JwtException("Unknown JWT kid: ...")`. We do
+    NOT silently fall back to the active key here, because that would mask a
+    typo in ops config (e.g. `active-kid: v2` but no `v2` in `keys`).
+
+`application.yml` documents both shapes with a worked rotation playbook in
+comments. Default dev config still uses the single-secret form.
+
+#### Ops rotation playbook (documented in `JwtProperties` Javadoc)
+
+```
+1. Add jwt.keys.v2 alongside jwt.keys.v1 (active-kid still v1). Deploy.
+2. Flip active-kid to v2. Deploy.
+3. Wait one refresh-token-ttl (P7D today) for all v1 tokens to expire.
+4. Drop jwt.keys.v1. Deploy.
+```
+
+Zero downtime, zero forced re-login.
+
+#### Tests added
+
+`JwtKeyRotationTest` — two cases:
+
+1. **Happy path:** mint a consumer token under `kid=v1`, build a *second*
+   `JwtFactory` with `kid=v2` active and `v1` still listed (simulates step 2
+   of the rotation), parse the old token → succeeds, claims intact.
+2. **Failure path:** mint under `v1`, verify with a factory that has only `v2`
+   listed (simulates step 4 happening too early) → `JwtException` with a
+   message containing `kid`. Proves the locator does not silently accept the
+   active key for an unknown `kid`.
+
+#### What bit us
+
+- First IT run failed with
+  `Failed to instantiate JwtProperties: No default constructor found`. Adding
+  the second (5-arg back-compat) constructor disabled Spring's automatic
+  canonical-constructor binding — fixed with `@ConstructorBinding` on the
+  7-arg constructor. The unit-test suite passed without this because tests
+  construct `JwtProperties` programmatically; only `@ConfigurationProperties`
+  binding cared.
+- JJWT 0.12 `keyLocator` and `verifyWith` are mutually exclusive — dropped
+  `verifyWith` once the locator was in place. Easy to miss in a half-port.
+
+#### Build status
+
+```
+[INFO] Tests run: 184, Failures: 0, Errors: 0, Skipped: 0  (Surefire — unit; +2 rotation tests)
+[INFO] Tests run:   9, Failures: 0, Errors: 0, Skipped: 0  (Failsafe — IT;   unchanged)
+[INFO] BUILD SUCCESS
+docs/openapi.json — unchanged (no controller / DTO change; security wiring only).
+```
+
+#### Carry-overs / known follow-ups
+
+- **No JWKS / asymmetric keys.** This stays HS256 — symmetric, shared between
+  signer and verifier. Moving to RS256/ES256 + a `/.well-known/jwks.json` is
+  an order of magnitude more work and only earns its keep when there are
+  multiple BE services verifying the same token. Single-monolith today: not
+  worth it. File when we split.
+- **Manual rotation only.** No `/admin/auth/rotate-key` endpoint, no auto-roll
+  on a schedule. Ops edits `application-prod.yml` and redeploys. Add an
+  endpoint when there's a real rotation cadence to automate (today: ad-hoc on
+  secret-leak incidents).
+- **No telemetry on `kid` usage.** Could emit a Micrometer counter tagged with
+  `kid` so a dashboard shows when the old kid finally hits zero — defer until
+  the first real rotation, when we'll know whether we want it.
+
+
 ## How to update this log
 
 1. At the end of a stage, append (or fill in) the corresponding subsection.

@@ -63,7 +63,15 @@ jwt:
   consumer-verification-ttl: PT5M
   issuer: complaints-api
   # HS256 secret — DEV ONLY default. Override per-env via ${JWT_SECRET}.
+  # Single-secret form. Auto-wrapped into kid="v1" so issued tokens carry a kid header.
   secret: ${JWT_SECRET:dev-secret-do-not-use-in-prod-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_}
+  # Multi-key rotation form (Stage 21.2.7) — when set, takes precedence over `secret`.
+  # Ops playbook: add jwt.keys.v2, deploy, flip active-kid to v2, wait one refresh-token-ttl,
+  # then drop jwt.keys.v1.
+  # active-kid: v1
+  # keys:
+  #   v1: ${JWT_SECRET_V1:?required}
+  #   v2: ${JWT_SECRET_V2:?required}
 
 app:
   timezone: Asia/Kolkata
